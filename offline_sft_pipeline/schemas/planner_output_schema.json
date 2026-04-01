@@ -1,0 +1,187 @@
+﻿{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "planner_output_schema.json",
+  "title": "PlannerOutput",
+  "description": "One planner round output for the offline branching pipeline.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "sample_id",
+    "trajectory_id",
+    "round_idx",
+    "created_at",
+    "can_answer_now",
+    "global_chain_cot",
+    "direct_answer",
+    "stop_reason",
+    "suggestions"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.1.0"
+    },
+    "sample_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "trajectory_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "round_idx": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "can_answer_now": {
+      "type": "boolean"
+    },
+    "global_chain_cot": {
+      "type": "string"
+    },
+    "direct_answer": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "stop_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "suggestions": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "$ref": "#/$defs/suggestion"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "can_answer_now": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "direct_answer": {
+            "type": "string",
+            "minLength": 1
+          },
+          "suggestions": {
+            "maxItems": 0
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "can_answer_now": {
+            "const": false
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "suggestions": {
+            "minItems": 1
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "suggestion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "suggestion_id",
+        "suggestion_cot",
+        "steps"
+      ],
+      "properties": {
+        "suggestion_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "suggestion_cot": {
+          "type": "string",
+          "minLength": 1
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/stepSpec"
+          }
+        }
+      }
+    },
+    "stepSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "step_id",
+        "step_goal",
+        "capability_plan",
+        "executor_instruction"
+      ],
+      "properties": {
+        "step_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "step_goal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "capability_plan": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/capabilityPlanItem"
+          }
+        },
+        "executor_instruction": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "capabilityPlanItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order",
+        "capability",
+        "instruction"
+      ],
+      "properties": {
+        "order": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "capability": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_]*$"
+        },
+        "instruction": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

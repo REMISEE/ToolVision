@@ -1,0 +1,2 @@
+Reserved for future committee judge prompt wiring.
+Current JudgeClient does not read this file yet because judging is delegated to JudgeBackend.

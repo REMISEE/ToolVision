@@ -1,0 +1,6 @@
+model_store/
+__pycache__/
+*.pyc
+paddleocr_vl_service/.env
+offline_sft_pipeline/outputs/
+Grounded-SAM-2/

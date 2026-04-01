@@ -1,0 +1,44 @@
+# Copyright 2024 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .config import omega_conf_to_dataclass, validate_config
+    from .tokenizer import hf_processor, hf_tokenizer
+
+__all__ = (
+    "hf_processor",
+    "hf_tokenizer",
+    "omega_conf_to_dataclass",
+    "validate_config",
+)
+
+
+def __getattr__(name: str):
+    if name in {"omega_conf_to_dataclass", "validate_config"}:
+        from .config import omega_conf_to_dataclass, validate_config
+
+        return {
+            "omega_conf_to_dataclass": omega_conf_to_dataclass,
+            "validate_config": validate_config,
+        }[name]
+    if name in {"hf_processor", "hf_tokenizer"}:
+        from .tokenizer import hf_processor, hf_tokenizer
+
+        return {
+            "hf_processor": hf_processor,
+            "hf_tokenizer": hf_tokenizer,
+        }[name]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

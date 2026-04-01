@@ -1,0 +1,31 @@
+Current execution context:
+
+sample_id: $sample_id
+trajectory_id: $trajectory_id
+round_idx: $round_idx
+step_idx: $step_idx
+suggestion_id: $suggestion_id
+suggestion_step_index: $suggestion_step_index
+
+Question:
+$question
+
+Planner global reasoning:
+$planner_global_chain_cot
+
+Selected suggestion rationale:
+$suggestion_cot
+
+Current step spec:
+$step_spec_json
+
+Current visible images:
+$visible_images_json
+
+Conversation history:
+$messages_json
+
+Available capabilities:
+$tool_capabilities_json
+
+Return <think> first, then <code>.

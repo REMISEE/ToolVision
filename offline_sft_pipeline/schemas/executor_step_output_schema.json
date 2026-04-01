@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "executor_step_output_schema.json",
+  "title": "ExecutorStepOutput",
+  "description": "Structured executor model output for one step before step files and runtime results are written.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "cot",
+    "code",
+    "raw_response_text",
+    "metadata"
+  ],
+  "properties": {
+    "cot": {
+      "type": "string"
+    },
+    "code": {
+      "type": "string",
+      "minLength": 1
+    },
+    "raw_response_text": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "metadata": {
+      "type": "object"
+    }
+  }
+}

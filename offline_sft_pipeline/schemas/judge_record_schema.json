@@ -1,0 +1,107 @@
+﻿{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "judge_record_schema.json",
+  "title": "JudgeRecord",
+  "description": "Judge output for one trajectory or one step. v0.1 focuses on score-based control in the hot path.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "judge_record_id",
+    "sample_id",
+    "trajectory_id",
+    "scope_type",
+    "scope_step_idx",
+    "judge_stage",
+    "created_at",
+    "keep_for_frontier",
+    "exportable",
+    "overall_score",
+    "answerability_score",
+    "tool_use_quality_score",
+    "trajectory_progress_score",
+    "note"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.1.0"
+    },
+    "judge_record_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sample_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "trajectory_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scope_type": {
+      "type": "string",
+      "enum": [
+        "trajectory",
+        "step"
+      ]
+    },
+    "scope_step_idx": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "judge_stage": {
+      "type": "string",
+      "enum": [
+        "cheap_filter",
+        "committee",
+        "final_select"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "keep_for_frontier": {
+      "type": "boolean"
+    },
+    "exportable": {
+      "type": "boolean"
+    },
+    "overall_score": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "answerability_score": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "tool_use_quality_score": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "trajectory_progress_score": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "note": {
+      "type": "string"
+    }
+  }
+}

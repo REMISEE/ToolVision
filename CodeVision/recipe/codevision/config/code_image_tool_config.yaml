@@ -1,0 +1,85 @@
+tools:
+  - class_name: "verl.tools.code_image_tool.CodeImageTool"
+    config: 
+      type: native
+      num_workers: 20
+      rate_limit: 50
+      timeout: 30
+      max_code_length: 2048
+      enable_global_rate_limit: true
+      enable_external_model_functions: true
+      external_call_mode: "service"
+      ocr_model_name: "paddleocr"
+      external_services:
+        paddleocr:
+          base_url: "http://127.0.0.1:8080"
+          request_timeout: 180
+          default_file_type: 1
+          visualize: false
+          line_y_threshold: 0.6
+        paddleocr_vl:
+          serving_base_url: "http://127.0.0.1:8080"
+          request_timeout: 180
+          default_file_type: 1
+          visualize: false
+          restructure_pages: false
+        grounded_sam2:
+          base_url: "http://127.0.0.1:8081"
+          request_timeout: 180
+        depth:
+          base_url: "http://127.0.0.1:8082"
+          request_timeout: 180
+        count:
+          base_url: "http://127.0.0.1:8083"
+          request_timeout: 180
+    tool_schema:
+      type: "function"
+      function:
+        name: "code_image_tool"
+        description: "A unified tool for image processing using executable Python code. Supports basic operations (zoom in, resize, rotate, flip, brightness, contrast), cv2/PIL/numpy processing, and external helper functions for PaddleOCR-VL and GroundedSAM2."
+        parameters:
+          type: "object"
+          properties:
+            code:
+              type: "string"
+              description: |
+                Python code to process the image. Use 'image' or 'img' for input, 'draw' for drawing.
+                Important: Do not read image from file or URL, directly use the image variables.
+                Return PIL Image object and save the result to 'result' or 'output' variable.
+                Available helper functions:
+                - _call_ocr_assist(image_index=None, image_obj=None, **kwargs)
+                  Returns dict: {"image": PIL.Image, "images": list[PIL.Image], "text": str, "meta": dict}
+                  Side effect: updates current 'image' / 'img' to returned image.
+                - _call_ground_box(text_prompt, image_index=None, image_obj=None, box_threshold=0.35, text_threshold=0.25, **kwargs)
+                  Grounding only: return image with anchor boxes.
+                - _call_sam_mask(text_prompt, image_index=None, image_obj=None, box_threshold=0.35, text_threshold=0.25, multimask_output=False, mask_alpha=0.45, draw_box_on_mask=True, **kwargs)
+                  Grounding + SAM2 mask: return image with semi-transparent highlighted mask.
+                - _call_dino_crop(text_prompt, image_index=None, image_obj=None, based_on="box"|"mask", detection_index=0, max_crops=1, padding=0, box_threshold=0.35, text_threshold=0.25, multimask_output=False, **kwargs)
+                  Return cropped image(s) based on detected box/mask.
+                - _call_blur_bg(text_prompt, image_index=None, image_obj=None, blur_radius=8.0, box_threshold=0.35, text_threshold=0.25, multimask_output=False, **kwargs)
+                  Blur background while keeping detected foreground sharp.
+                - _call_focus(text_prompt, ...)
+                  Backward-compatible alias of _call_ground_box.
+                All GroundedSAM2 helpers return dict: {"image": PIL.Image, "images": list[PIL.Image], "text": str, "meta": dict}
+                and update current 'image' / 'img' to returned image.
+                Examples:
+                - Zoom in: result = image.crop((x_min, y_min, x_max, y_max))
+                - Rotate: result = image.rotate(90/180/270, expand=True), expand=True must be set to True
+                - Flip: result = image.transpose(Image.FLIP_LEFT_RIGHT) or image.transpose(Image.FLIP_TOP_BOTTOM)
+                - Brightness: result = ImageEnhance.Brightness(image).enhance(factor)
+                - Contrast: result = ImageEnhance.Contrast(image).enhance(factor)
+                - OCR assist: ocr = _call_ocr_assist(); print(ocr["text"]); result = ocr["image"]
+                - Ground box: box = _call_ground_box("car. tire."); result = box["image"]
+                - SAM mask: mask = _call_sam_mask("car. tire.", multimask_output=True); result = mask["image"]
+                - Dino crop: crop = _call_dino_crop("car. tire.", based_on="mask", max_crops=1, padding=8); result = crop["image"]
+                - Blur bg: blur = _call_blur_bg("car."); result = blur["image"]
+                - Combine models + cv2: box = _call_ground_box("table."); ocr = _call_ocr_assist(image_obj=box["image"]); result = ocr["image"]
+                You can also use other operations from PIL, NumPy, OpenCV, and math libraries. You should observe the image carefully and determine the best operation to perform. If the image has a wrong direction (usually happens), you should consider flipping or rotating the image to the correct direction before answering the question. Important Hint: Zoom in, Rotate and Flip are the most common operations to solve the question and should be prioritized.
+            description:
+              type: "string"
+              description: "Clear description of what the code does. For example, 'Draw a line from (10, 20) to (30, 40)', 'Flip the image horizontally'"
+            image_index:
+              type: "integer"
+              minimum: 0
+              description: "Index of the image in the trajectory to process (0-based)."
+          required: ["code", "description", "image_index"]

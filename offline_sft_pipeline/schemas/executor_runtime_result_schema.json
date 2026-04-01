@@ -1,0 +1,227 @@
+﻿{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "executor_runtime_result_schema.json",
+  "title": "ExecutorRuntimeResult",
+  "description": "Runtime execution result for one executor step. This stays close to image/text/meta while keeping enough bookkeeping for offline analysis.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "sample_id",
+    "trajectory_id",
+    "round_idx",
+    "step_idx",
+    "created_at",
+    "success",
+    "images",
+    "text",
+    "meta",
+    "observed_helper_call_count",
+    "observed_helper_calls",
+    "code_execution",
+    "error"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.1.0"
+    },
+    "sample_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "trajectory_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "round_idx": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "step_idx": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "success": {
+      "type": "boolean"
+    },
+    "images": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifactRef"
+      }
+    },
+    "text": {
+      "type": "string"
+    },
+    "meta": {
+      "type": "object"
+    },
+    "observed_helper_call_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "observed_helper_calls": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/helperCall"
+      }
+    },
+    "code_execution": {
+      "$ref": "#/$defs/codeExecution"
+    },
+    "error": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/errorInfo"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "path"
+      ],
+      "properties": {
+        "artifact_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "media_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "width": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "height": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        }
+      }
+    },
+    "helperCall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order",
+        "name"
+      ],
+      "properties": {
+        "order": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_]*$"
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "ok",
+            "error",
+            null
+          ]
+        }
+      }
+    },
+    "codeExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code_path",
+        "exit_code",
+        "started_at",
+        "finished_at",
+        "elapsed_seconds",
+        "stdout_path",
+        "stderr_path"
+      ],
+      "properties": {
+        "code_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "exit_code": {
+          "type": "integer"
+        },
+        "started_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "finished_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "elapsed_seconds": {
+          "type": "number",
+          "minimum": 0
+        },
+        "stdout_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stderr_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "errorInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "message"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "traceback_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}
