@@ -129,12 +129,18 @@ def make_executor_output(cot: str, code: str) -> ExecutorStepOutput:
 
 
 def render_planner_output_as_model_text(planner_output: PlannerOutput) -> str:
-    think_block = f"<think>\n{planner_output.global_chain_cot}\n</think>"
+    payload: dict[str, Any] = {
+        "think": planner_output.global_chain_cot,
+    }
+    if planner_output.stop_reason is not None:
+        payload["stop_reason"] = planner_output.stop_reason
     if planner_output.can_answer_now:
-        return f"{think_block}\n<answer>\n{planner_output.direct_answer or ''}\n</answer>"
-    suggestions_payload = [item.model_dump(mode="json") for item in planner_output.suggestions]
-    suggestions_json = json.dumps(suggestions_payload, ensure_ascii=False, indent=2)
-    return f"{think_block}\n<suggestions>\n{suggestions_json}\n</suggestions>"
+        payload["mode"] = "answer"
+        payload["answer"] = planner_output.direct_answer or ""
+    else:
+        payload["mode"] = "suggestions"
+        payload["suggestions"] = [item.model_dump(mode="json") for item in planner_output.suggestions]
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 def render_executor_output_as_model_text(executor_output: ExecutorStepOutput) -> str:
@@ -213,9 +219,21 @@ class ScriptedTextBackend:
         stage: str,
         system_prompt: str,
         user_prompt: str,
+        context: dict[str, Any] | None = None,
     ) -> BackendResponse:
-        trajectory_id = self._extract_prompt_field(user_prompt, "trajectory_id")
-        round_idx = int(self._extract_prompt_field(user_prompt, "round_idx"))
+        request_obj = self._extract_context_request(context)
+        trajectory_id = self._extract_request_field(
+            request_obj,
+            "trajectory_id",
+            fallback_prompt=user_prompt,
+        )
+        round_idx = int(
+            self._extract_request_field(
+                request_obj,
+                "round_idx",
+                fallback_prompt=user_prompt,
+            )
+        )
         step_idx = None
         response_text = ""
         metadata = {
@@ -225,6 +243,7 @@ class ScriptedTextBackend:
             "round_idx": round_idx,
             "system_prompt_chars": len(system_prompt),
             "user_prompt_chars": len(user_prompt),
+            "has_context": context is not None,
         }
         if stage == "planner":
             key = (trajectory_id, round_idx)
@@ -232,7 +251,13 @@ class ScriptedTextBackend:
                 raise KeyError(f"Missing scripted planner text response for {key}.")
             response_text = render_planner_output_as_model_text(self.planner_outputs[key])
         elif stage == "executor":
-            step_idx = int(self._extract_prompt_field(user_prompt, "step_idx"))
+            step_idx = int(
+                self._extract_request_field(
+                    request_obj,
+                    "step_idx",
+                    fallback_prompt=user_prompt,
+                )
+            )
             key = (trajectory_id, step_idx)
             if key not in self.executor_outputs:
                 raise KeyError(f"Missing scripted executor text response for {key}.")
@@ -248,9 +273,29 @@ class ScriptedTextBackend:
                 "step_idx": step_idx,
                 "system_prompt_chars": len(system_prompt),
                 "user_prompt_chars": len(user_prompt),
+                "has_context": context is not None,
             }
         )
         return BackendResponse(text=response_text, metadata=metadata)
+
+    def _extract_context_request(self, context: dict[str, Any] | None) -> Any | None:
+        if not context:
+            return None
+        return context.get("request")
+
+    def _extract_request_field(
+        self,
+        request_obj: Any | None,
+        field_name: str,
+        *,
+        fallback_prompt: str,
+    ) -> str:
+        if request_obj is not None:
+            if isinstance(request_obj, dict) and field_name in request_obj:
+                return str(request_obj[field_name]).strip()
+            if hasattr(request_obj, field_name):
+                return str(getattr(request_obj, field_name)).strip()
+        return self._extract_prompt_field(fallback_prompt, field_name)
 
     def _extract_prompt_field(self, prompt: str, field_name: str) -> str:
         pattern = self._FIELD_PATTERNS[field_name]
@@ -299,17 +344,25 @@ class ScriptedRuntime:
     to the same locations that the real runtime wrapper would use.
     """
 
-    def __init__(self, responses: dict[tuple[str, int], RuntimeSpec]) -> None:
+    def __init__(
+        self,
+        responses: dict[tuple[str, int], RuntimeSpec],
+        *,
+        default_spec: RuntimeSpec | None = None,
+    ) -> None:
         self.responses = dict(responses)
+        self.default_spec = default_spec
         self.requests: list[RuntimeStepRequest] = []
 
     def run_step_sync(self, request: RuntimeStepRequest | dict[str, Any]) -> RuntimeStepOutput:
         req = request if isinstance(request, RuntimeStepRequest) else RuntimeStepRequest.from_dict(request)
         self.requests.append(req)
         key = (req.trajectory_id, req.step_idx)
-        if key not in self.responses:
-            raise KeyError(f"Missing scripted runtime response for {key}.")
-        spec = self.responses[key]
+        spec = self.responses.get(key)
+        if spec is None:
+            if self.default_spec is None:
+                raise KeyError(f"Missing scripted runtime response for {key}.")
+            spec = self.default_spec
 
         step_dir = Path(req.step_output_dir)
         step_dir.mkdir(parents=True, exist_ok=True)
@@ -685,8 +738,6 @@ def build_three_round_demo_spec(
         max_child_trajectories=3,
         default_budget=Budget(
             remaining_rounds=3,
-            remaining_children=3,
-            remaining_steps=3,
         ),
     )
 

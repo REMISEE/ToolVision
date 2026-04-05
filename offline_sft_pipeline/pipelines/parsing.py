@@ -86,10 +86,57 @@ def parse_json_text(text: str, *, stage: str, tag: str) -> Any:
         ) from exc
 
 
+def strip_markdown_json_fence(text: str) -> str:
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    lines = stripped.splitlines()
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    while lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def try_parse_json_object_from_text(text: str) -> dict[str, Any] | None:
+    stripped = strip_markdown_json_fence(text)
+    if not stripped:
+        return None
+    try:
+        payload = json.loads(stripped)
+    except json.JSONDecodeError:
+        start = stripped.find("{")
+        end = stripped.rfind("}")
+        if start == -1 or end <= start:
+            return None
+        try:
+            payload = json.loads(stripped[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def looks_like_planner_json_payload(payload: dict[str, Any]) -> bool:
+    return "mode" in payload and "think" in payload
+
+
+def try_parse_planner_json_payload(text: str) -> dict[str, Any] | None:
+    payload = try_parse_json_object_from_text(text)
+    if payload is None or not looks_like_planner_json_payload(payload):
+        return None
+    return payload
+
+
 __all__ = [
     "ModelResponseParseError",
     "ensure_tag_order",
     "extract_required_tag",
     "extract_tag_block",
+    "looks_like_planner_json_payload",
     "parse_json_text",
+    "strip_markdown_json_fence",
+    "try_parse_json_object_from_text",
+    "try_parse_planner_json_payload",
 ]

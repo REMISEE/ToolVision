@@ -17,6 +17,7 @@ class PaddleOCRHTTPClient:
         default_file_type: int = 1,
         default_visualize: Optional[bool] = None,
         line_y_threshold: float = 0.6,
+        default_request_options: Optional[dict[str, Any]] = None,
     ):
         self.base_url = str(base_url).rstrip("/")
         self.ocr_url = f"{self.base_url}/ocr"
@@ -24,6 +25,7 @@ class PaddleOCRHTTPClient:
         self.default_file_type = int(default_file_type)
         self.default_visualize = default_visualize
         self.line_y_threshold = float(line_y_threshold)
+        self.default_request_options = dict(default_request_options or {})
 
     def _image_to_base64(self, image: Image.Image) -> str:
         buf = io.BytesIO()
@@ -68,6 +70,10 @@ class PaddleOCRHTTPClient:
                 payload[dst] = kwargs[src]
             elif dst in kwargs:
                 payload[dst] = kwargs[dst]
+            elif src in self.default_request_options:
+                payload[dst] = self.default_request_options[src]
+            elif dst in self.default_request_options:
+                payload[dst] = self.default_request_options[dst]
         if "visualize" not in payload and self.default_visualize is not None:
             payload["visualize"] = self.default_visualize
         return payload

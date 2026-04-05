@@ -68,17 +68,11 @@ def build_ocr_request_kwargs(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
-def format_python_kwargs(kwargs: dict[str, Any]) -> str:
-    return ", ".join(f"{key}={value!r}" for key, value in kwargs.items())
-
-
 def build_case_spec(case_name: str, args: argparse.Namespace) -> dict[str, str]:
     prompt = args.focus_prompt
     crop_padding = int(args.crop_padding)
-    crop_based_on = args.crop_based_on
-    ocr_kwargs_expr = format_python_kwargs(build_ocr_request_kwargs(args))
-    ocr_call = f"_call_ocr_assist({ocr_kwargs_expr})"
-    crop_ocr_call = f"_call_ocr_assist(image_obj=crop[\"image\"], {ocr_kwargs_expr})"
+    ocr_call = "_call_ocr_assist()"
+    crop_ocr_call = '_call_ocr_assist(image_obj=crop["image"])'
 
     if case_name == "ocr_only":
         return {
@@ -116,7 +110,7 @@ def build_case_spec(case_name: str, args: argparse.Namespace) -> dict[str, str]:
             "cot": "First crop the sign target with grounded_sam2, then OCR the crop and inspect helper trace ordering.\n",
             "code": "\n".join(
                 [
-                    f"crop = _call_dino_crop({prompt!r}, based_on={crop_based_on!r}, max_crops=1, padding={crop_padding})",
+                    f"crop = _call_dino_crop({prompt!r}, max_crops=1, padding={crop_padding})",
                     'print("crop_text:", crop["text"])',
                     f"ocr = {crop_ocr_call}",
                     'print("crop_ocr_text:", ocr["text"])',
@@ -149,6 +143,7 @@ def build_external_services_config(args: argparse.Namespace) -> dict[str, Any]:
             "default_file_type": 1,
             "visualize": args.ocr_visualize,
             "line_y_threshold": args.line_y_threshold,
+            **build_ocr_request_kwargs(args),
         },
         "grounded_sam2": {
             "base_url": args.grounded_sam2_base_url,
@@ -235,7 +230,6 @@ def parse_args() -> argparse.Namespace:
         help="Pass return_word_box to OCR helper.",
     )
     parser.add_argument("--focus-prompt", type=str, default="sign.")
-    parser.add_argument("--crop-based-on", type=str, default="box", choices=["box", "mask"])
     parser.add_argument("--crop-padding", type=int, default=4)
     parser.add_argument(
         "--ocr-visualize",

@@ -35,6 +35,7 @@ class ExecutorClient:
             stage="executor",
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+            context=self._build_backend_context(req),
         )
         executor_output = self._parse_model_text(backend_response.text, metadata=backend_response.metadata)
         executor_output.validate_against_schema()
@@ -69,6 +70,17 @@ class ExecutorClient:
                 [item.model_dump(mode="json") for item in request.tool_capabilities]
             ),
         )
+
+    def _build_backend_context(self, request: ExecutorClientRequest) -> dict[str, Any]:
+        return {
+            "request": request.model_copy(deep=True),
+            "paths": {
+                "sample_dir": request.sample_dir,
+                "trajectory_dir": request.trajectory_dir,
+                "planner_dir": request.planner_dir,
+                "steps_dir": request.steps_dir,
+            },
+        }
 
     def _parse_model_text(self, text: str, *, metadata: dict[str, Any]) -> ExecutorStepOutput:
         ensure_tag_order(text, stage="executor", first_tag="think", second_tag="code")

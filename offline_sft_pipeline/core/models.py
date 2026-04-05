@@ -422,8 +422,6 @@ class JudgeRecordRef(PipelineBaseModel):
 
 class Budget(PipelineBaseModel):
     remaining_rounds: int
-    remaining_children: int
-    remaining_steps: int
 
 
 class TrajectoryErrorInfo(PipelineBaseModel):

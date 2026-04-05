@@ -15,6 +15,15 @@ tools:
           base_url: "http://127.0.0.1:8080"
           request_timeout: 180
           default_file_type: 1
+          use_doc_orientation_classify: false
+          use_doc_unwarping: false
+          use_textline_orientation: true
+          text_det_limit_side_len: 960
+          text_det_limit_type: "max"
+          text_det_thresh: 0.4
+          text_det_box_thresh: 0.7
+          text_rec_score_thresh: 0.6
+          return_word_box: false
           visualize: false
           line_y_threshold: 0.6
         paddleocr_vl:
@@ -49,19 +58,28 @@ tools:
                 Available helper functions:
                 - _call_ocr_assist(image_index=None, image_obj=None, **kwargs)
                   Returns dict: {"image": PIL.Image, "images": list[PIL.Image], "text": str, "meta": dict}
+                  Reads text from the selected image. Prefer backend defaults unless OCR tuning is explicitly needed.
                   Side effect: updates current 'image' / 'img' to returned image.
+                - _call_manual_box(x1, y1, x2, y2, image_index=None, image_obj=None, outline="lime", width=2, label=None, label_fill=None)
+                  Draw a box using explicit coordinates. This helper does not call any external model.
+                - _call_manual_crop(x1, y1, x2, y2, image_index=None, image_obj=None, padding=0)
+                  Crop a region using explicit coordinates. This helper does not call any external model.
                 - _call_ground_box(text_prompt, image_index=None, image_obj=None, box_threshold=0.35, text_threshold=0.25, **kwargs)
                   Grounding only: return image with anchor boxes.
                 - _call_sam_mask(text_prompt, image_index=None, image_obj=None, box_threshold=0.35, text_threshold=0.25, multimask_output=False, mask_alpha=0.45, draw_box_on_mask=True, **kwargs)
                   Grounding + SAM2 mask: return image with semi-transparent highlighted mask.
-                - _call_dino_crop(text_prompt, image_index=None, image_obj=None, based_on="box"|"mask", detection_index=0, max_crops=1, padding=0, box_threshold=0.35, text_threshold=0.25, multimask_output=False, **kwargs)
-                  Return cropped image(s) based on detected box/mask.
+                - _call_dino_crop(text_prompt, image_index=None, image_obj=None, max_crops=1, padding=0, box_threshold=0.35, text_threshold=0.25, **kwargs)
+                  Return cropped image(s) based on detected boxes. The default and recommended crop mode is box-based.
                 - _call_blur_bg(text_prompt, image_index=None, image_obj=None, blur_radius=8.0, box_threshold=0.35, text_threshold=0.25, multimask_output=False, **kwargs)
                   Blur background while keeping detected foreground sharp.
                 - _call_focus(text_prompt, ...)
                   Backward-compatible alias of _call_ground_box.
                 All GroundedSAM2 helpers return dict: {"image": PIL.Image, "images": list[PIL.Image], "text": str, "meta": dict}
                 and update current 'image' / 'img' to returned image.
+                Image selection rules:
+                - If image_obj and image_index are both omitted, a helper uses the current default image for this step.
+                - Use image_obj=prev["image"] to continue from a previous helper result in the same code block.
+                - Use image_index to explicitly revisit another candidate input image such as the root image.
                 Examples:
                 - Zoom in: result = image.crop((x_min, y_min, x_max, y_max))
                 - Rotate: result = image.rotate(90/180/270, expand=True), expand=True must be set to True
@@ -69,9 +87,11 @@ tools:
                 - Brightness: result = ImageEnhance.Brightness(image).enhance(factor)
                 - Contrast: result = ImageEnhance.Contrast(image).enhance(factor)
                 - OCR assist: ocr = _call_ocr_assist(); print(ocr["text"]); result = ocr["image"]
+                - Manual box: box = _call_manual_box(120, 80, 260, 180, label="target"); result = box["image"]
+                - Manual crop: crop = _call_manual_crop(120, 80, 260, 180, padding=4); result = crop["image"]
                 - Ground box: box = _call_ground_box("car. tire."); result = box["image"]
                 - SAM mask: mask = _call_sam_mask("car. tire.", multimask_output=True); result = mask["image"]
-                - Dino crop: crop = _call_dino_crop("car. tire.", based_on="mask", max_crops=1, padding=8); result = crop["image"]
+                - Dino crop: crop = _call_dino_crop("car. tire.", max_crops=1, padding=8); result = crop["image"]
                 - Blur bg: blur = _call_blur_bg("car."); result = blur["image"]
                 - Combine models + cv2: box = _call_ground_box("table."); ocr = _call_ocr_assist(image_obj=box["image"]); result = ocr["image"]
                 You can also use other operations from PIL, NumPy, OpenCV, and math libraries. You should observe the image carefully and determine the best operation to perform. If the image has a wrong direction (usually happens), you should consider flipping or rotating the image to the correct direction before answering the question. Important Hint: Zoom in, Rotate and Flip are the most common operations to solve the question and should be prioritized.

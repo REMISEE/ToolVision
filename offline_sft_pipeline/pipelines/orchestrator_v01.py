@@ -60,8 +60,6 @@ class OrchestratorConfig:
     default_budget: Budget = field(
         default_factory=lambda: Budget(
             remaining_rounds=3,
-            remaining_children=3,
-            remaining_steps=3,
         )
     )
     system_message: str = DEFAULT_SYSTEM_MESSAGE
@@ -251,23 +249,22 @@ class OrchestratorV01:
     def _plan_trajectory(self, trajectory: TrajectoryRecord) -> _PlannerRoundContext:
         messages_doc = self.store.load_messages(trajectory.sample_id, trajectory.trajectory_id)
         visible_images = self._select_visible_images(trajectory)
-        requested_suggestion_count = 0
-        if trajectory.budget.remaining_children > 0 and trajectory.budget.remaining_steps > 0:
-            requested_suggestion_count = min(
-                self.config.effective_planner_suggestion_count,
-                trajectory.budget.remaining_children,
-            )
+        requested_suggestion_count = self.config.effective_planner_suggestion_count
         planner_request = PlannerClientRequest(
             sample_id=trajectory.sample_id,
             trajectory_id=trajectory.trajectory_id,
             round_idx=self._next_planner_round_idx(trajectory),
+            sample_dir=str(self.store.sample_dir(trajectory.sample_id)),
+            trajectory_dir=str(self.store.trajectory_dir(trajectory.sample_id, trajectory.trajectory_id)),
+            planner_dir=str(self.store.planner_dir(trajectory.sample_id, trajectory.trajectory_id)),
+            steps_dir=str(self.store.steps_dir(trajectory.sample_id, trajectory.trajectory_id)),
             question=trajectory.question,
             messages=list(messages_doc.root),
             visible_images=visible_images,
             budget=trajectory.budget.model_copy(deep=True),
             tool_capabilities=[item.model_copy(deep=True) for item in self.tool_capabilities],
             latest_runtime_result=self._load_latest_runtime_result(trajectory),
-            requested_suggestion_count=requested_suggestion_count or None,
+            requested_suggestion_count=requested_suggestion_count,
             metadata={"orchestrator_version": "v01"},
         )
         planner_output = self.planner_client.run(planner_request)
@@ -369,6 +366,14 @@ class OrchestratorV01:
                     trajectory_id=child_trajectory.trajectory_id,
                     round_idx=candidate.planner_output.round_idx,
                     step_idx=step_idx,
+                    sample_dir=str(self.store.sample_dir(child_trajectory.sample_id)),
+                    trajectory_dir=str(
+                        self.store.trajectory_dir(child_trajectory.sample_id, child_trajectory.trajectory_id)
+                    ),
+                    planner_dir=str(
+                        self.store.planner_dir(child_trajectory.sample_id, child_trajectory.trajectory_id)
+                    ),
+                    steps_dir=str(self.store.steps_dir(child_trajectory.sample_id, child_trajectory.trajectory_id)),
                     question=child_trajectory.question,
                     messages=list(messages_doc.root),
                     visible_images=visible_images,
@@ -516,7 +521,6 @@ class OrchestratorV01:
         judge_record: JudgeRecord,
     ) -> TrajectoryRecord:
         updated = self.store.load_trajectory(trajectory.sample_id, trajectory.trajectory_id)
-        updated.budget.remaining_steps = max(0, updated.budget.remaining_steps - 1)
 
         if not runtime_result.success:
             updated.status = "failed"
@@ -524,7 +528,7 @@ class OrchestratorV01:
             updated.status = "pruned"
         elif not judge_record.keep_for_frontier:
             updated.status = "pruned"
-        elif updated.budget.remaining_steps <= 0 or updated.budget.remaining_rounds <= 0:
+        elif updated.budget.remaining_rounds <= 0:
             updated.status = "max_step_reached"
         else:
             updated.status = "running"
@@ -537,13 +541,10 @@ class OrchestratorV01:
     def _finalize_unselected_parent(self, trajectory: TrajectoryRecord) -> TrajectoryRecord:
         if not self.config.stop_unselected_trajectories:
             return trajectory
-        status = "stopped_early"
-        if trajectory.budget.remaining_children <= 0 or trajectory.budget.remaining_steps <= 0:
-            status = "max_step_reached"
         return self.store.mark_trajectory_status(
             trajectory.sample_id,
             trajectory.trajectory_id,
-            status=status,
+            status="stopped_early",
             pending_execution=None,
         )
 
@@ -697,8 +698,6 @@ class OrchestratorV01:
     def _build_child_budget(self, parent_budget: Budget) -> Budget:
         return Budget(
             remaining_rounds=max(0, parent_budget.remaining_rounds - 1),
-            remaining_children=max(0, parent_budget.remaining_children - 1),
-            remaining_steps=parent_budget.remaining_steps,
         )
 
     def _mark_trajectory_error(

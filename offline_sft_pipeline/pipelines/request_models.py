@@ -28,6 +28,10 @@ class PlannerClientRequest(PipelineBaseModel):
     sample_id: str
     trajectory_id: str
     round_idx: int
+    sample_dir: str | None = None
+    trajectory_dir: str | None = None
+    planner_dir: str | None = None
+    steps_dir: str | None = None
     question: str
     messages: list[ConversationMessage] = Field(default_factory=list)
     visible_images: list[ImageArtifactRef] = Field(default_factory=list)
@@ -55,6 +59,10 @@ class ExecutorClientRequest(PipelineBaseModel):
     trajectory_id: str
     round_idx: int
     step_idx: int
+    sample_dir: str | None = None
+    trajectory_dir: str | None = None
+    planner_dir: str | None = None
+    steps_dir: str | None = None
     question: str
     messages: list[ConversationMessage] = Field(default_factory=list)
     visible_images: list[ImageArtifactRef] = Field(default_factory=list)

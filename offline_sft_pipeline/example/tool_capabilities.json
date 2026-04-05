@@ -1,0 +1,37 @@
+[
+  {
+    "name": "ocr_assist",
+    "description": "Read text from the current image via _call_ocr_assist(); prefer image_obj= when chaining from a crop.",
+    "usage_notes": "Default OCR hyperparameters are set by runtime; usually call _call_ocr_assist() without extra kwargs."
+  },
+  {
+    "name": "manual_box",
+    "description": "Draw a box from explicit pixel coords via _call_manual_box(x1,y1,x2,y2,...).",
+    "usage_notes": "Use when coordinates are known; cheaper than detection-based grounding."
+  },
+  {
+    "name": "manual_crop",
+    "description": "Crop a rectangle via _call_manual_crop(x1,y1,x2,y2,...); often followed by ocr_assist on the crop.",
+    "usage_notes": "Prefer over dino_crop when the region is known."
+  },
+  {
+    "name": "ground_box",
+    "description": "Localize a target from a text prompt via _call_ground_box(text_prompt,...); returns a boxed image.",
+    "usage_notes": "Good first step when location is unknown."
+  },
+  {
+    "name": "sam_mask",
+    "description": "Segment/locate with SAM-style mask via _call_sam_mask(text_prompt,...).",
+    "usage_notes": "Use when a mask visualization helps more than a tight box."
+  },
+  {
+    "name": "dino_crop",
+    "description": "Crop likely regions from grounding via _call_dino_crop(text_prompt,...); prefer box-based crop.",
+    "usage_notes": "Chain image_obj=box['image'] after ground_box when needed."
+  },
+  {
+    "name": "blur_bg",
+    "description": "Blur background while keeping subject clear via _call_blur_bg(text_prompt,...).",
+    "usage_notes": "Optional when clutter hurts reading."
+  }
+]

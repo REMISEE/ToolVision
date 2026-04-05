@@ -129,6 +129,20 @@ class BaseExternalModelAdapter:
 class PaddleOCRServiceAdapter(BaseExternalModelAdapter):
     """HTTP adapter for PP-OCRv5/general OCR serving endpoints."""
 
+    _DEFAULT_REQUEST_OPTION_KEYS = (
+        "use_doc_orientation_classify",
+        "use_doc_unwarping",
+        "use_textline_orientation",
+        "text_det_limit_side_len",
+        "text_det_limit_type",
+        "text_det_thresh",
+        "text_det_box_thresh",
+        "text_det_unclip_ratio",
+        "text_rec_score_thresh",
+        "return_word_box",
+        "visualize",
+    )
+
     def __init__(self, config: dict[str, Any]):
         super().__init__(config)
         self.client: Optional[PaddleOCRHTTPClient] = None
@@ -137,12 +151,18 @@ class PaddleOCRServiceAdapter(BaseExternalModelAdapter):
         if self._initialized:
             return
         base_url = str(self.config.get("base_url") or self.config.get("serving_base_url") or "http://127.0.0.1:8080")
+        default_request_options = {
+            key: self.config[key]
+            for key in self._DEFAULT_REQUEST_OPTION_KEYS
+            if key in self.config
+        }
         self.client = PaddleOCRHTTPClient(
             base_url=base_url,
             request_timeout=int(self.config.get("request_timeout", 180)),
             default_file_type=int(self.config.get("default_file_type", 1)),
             default_visualize=self.config.get("visualize"),
             line_y_threshold=float(self.config.get("line_y_threshold", 0.6)),
+            default_request_options=default_request_options,
         )
         self._initialized = True
 
@@ -646,6 +666,48 @@ class CodeImageTool(BaseTool):
                 raise RuntimeError(f"image_index {idx} out of range. Available: 0..{len(images)-1}")
             return images[idx].copy()
 
+        def _normalize_xyxy_box(
+            *,
+            source_image: Any,
+            x1: float,
+            y1: float,
+            x2: float,
+            y2: float,
+            padding: int = 0,
+        ) -> list[int]:
+            if not hasattr(source_image, "size"):
+                raise RuntimeError("Selected image does not provide size information.")
+            width, height = source_image.size
+            px1 = min(float(x1), float(x2))
+            py1 = min(float(y1), float(y2))
+            px2 = max(float(x1), float(x2))
+            py2 = max(float(y1), float(y2))
+            pad = max(0, int(padding))
+
+            nx1 = max(0, int(round(px1 - pad)))
+            ny1 = max(0, int(round(py1 - pad)))
+            nx2 = min(int(width), int(round(px2 + pad)))
+            ny2 = min(int(height), int(round(py2 + pad)))
+
+            if nx2 <= nx1 or ny2 <= ny1:
+                raise RuntimeError(
+                    f"Invalid box after clipping: [{nx1}, {ny1}, {nx2}, {ny2}] for image size {width}x{height}."
+                )
+            return [nx1, ny1, nx2, ny2]
+
+        def _build_local_helper_result(
+            *,
+            output_image: Any,
+            text: str,
+            meta: dict[str, Any],
+        ) -> dict[str, Any]:
+            return {
+                "image": output_image,
+                "images": [output_image],
+                "text": text,
+                "meta": meta,
+            }
+
         # OCR helper：按配置选择 PaddleOCR 服务客户端。
         def _call_ocr_assist(image_index: Optional[int] = None, image_obj: Optional[Any] = None, **kwargs):
             return _run_helper(
@@ -656,6 +718,85 @@ class CodeImageTool(BaseTool):
                     kwargs,
                 ),
             )
+
+        # 本地坐标画框 helper：不依赖检测模型，直接按显式坐标画框。
+        def _call_manual_box(
+            x1: float,
+            y1: float,
+            x2: float,
+            y2: float,
+            image_index: Optional[int] = None,
+            image_obj: Optional[Any] = None,
+            outline: str = "lime",
+            width: int = 2,
+            label: Optional[str] = None,
+            label_fill: Optional[str] = None,
+        ):
+            def _impl() -> dict[str, Any]:
+                selected = _select_image(target_index=image_index, image_obj=image_obj)
+                bbox = _normalize_xyxy_box(
+                    source_image=selected,
+                    x1=x1,
+                    y1=y1,
+                    x2=x2,
+                    y2=y2,
+                )
+                out = selected.copy()
+                draw_obj = ImageDraw.Draw(out)
+                draw_obj.rectangle(tuple(bbox), outline=outline, width=max(1, int(width)))
+                if label is not None:
+                    text_fill = label_fill or outline
+                    text_x = bbox[0] + 2
+                    text_y = max(0, bbox[1] - 14)
+                    draw_obj.text((text_x, text_y), str(label), fill=text_fill)
+                return _build_local_helper_result(
+                    output_image=out,
+                    text=f"Manual box drawn at {bbox}.",
+                    meta={
+                        "model": "local_geometry",
+                        "operation": "manual_box",
+                        "bbox": bbox,
+                        "outline": outline,
+                        "width": max(1, int(width)),
+                        "label": None if label is None else str(label),
+                    },
+                )
+
+            return _run_helper("_call_manual_box", _impl)
+
+        # 本地坐标裁剪 helper：不依赖检测模型，直接按显式坐标裁剪。
+        def _call_manual_crop(
+            x1: float,
+            y1: float,
+            x2: float,
+            y2: float,
+            image_index: Optional[int] = None,
+            image_obj: Optional[Any] = None,
+            padding: int = 0,
+        ):
+            def _impl() -> dict[str, Any]:
+                selected = _select_image(target_index=image_index, image_obj=image_obj)
+                crop_box = _normalize_xyxy_box(
+                    source_image=selected,
+                    x1=x1,
+                    y1=y1,
+                    x2=x2,
+                    y2=y2,
+                    padding=padding,
+                )
+                cropped = selected.crop(tuple(crop_box))
+                return _build_local_helper_result(
+                    output_image=cropped,
+                    text=f"Manual crop returned 1 crop image from {crop_box}.",
+                    meta={
+                        "model": "local_geometry",
+                        "operation": "manual_crop",
+                        "crop_box": crop_box,
+                        "padding": max(0, int(padding)),
+                    },
+                )
+
+            return _run_helper("_call_manual_crop", _impl)
 
         # Grounding helper：仅绘制检测框。
         def _call_ground_box(
@@ -839,6 +980,8 @@ class CodeImageTool(BaseTool):
             '__last_helper_result__': None,
             '__helper_trace__': [],
             '_call_ocr_assist': _call_ocr_assist,
+            '_call_manual_box': _call_manual_box,
+            '_call_manual_crop': _call_manual_crop,
             '_call_ground_box': _call_ground_box,
             '_call_sam_mask': _call_sam_mask,
             '_call_dino_crop': _call_dino_crop,

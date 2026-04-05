@@ -15,7 +15,7 @@ $visible_images_json
 Conversation history:
 $messages_json
 
-Remaining budget:
+Remaining depth:
 $budget_json
 
 Latest runtime result:
@@ -25,5 +25,5 @@ Available capabilities:
 $tool_capabilities_json
 
 Decide whether the question can be answered now.
-If yes, return <think> followed by <answer>.
-If no, return <think> followed by <suggestions>.
+If yes, return one JSON object with mode="answer", plus think and answer.
+If no, return one JSON object with mode="suggestions", plus think and suggestions.

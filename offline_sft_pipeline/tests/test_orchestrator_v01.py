@@ -6,14 +6,18 @@ from pathlib import Path
 
 from offline_sft_pipeline.core.models import (
     Budget,
+    ConversationMessage,
+    ImageArtifactRef,
     build_child_trajectory_id,
     build_root_trajectory_id,
 )
 from offline_sft_pipeline.core.store import OfflineTrajectoryStore
+from offline_sft_pipeline.pipelines.backends import FakeTextBackend
 from offline_sft_pipeline.pipelines.executor_client import ExecutorClient
 from offline_sft_pipeline.pipelines.judge_client import JudgeClient
 from offline_sft_pipeline.pipelines.orchestrator_v01 import OrchestratorConfig, OrchestratorV01
 from offline_sft_pipeline.pipelines.planner_client import PlannerClient
+from offline_sft_pipeline.pipelines.request_models import PlannerClientRequest
 from offline_sft_pipeline.pipelines.scripted_components import (
     ScriptedExecutorClient,
     ScriptedJudgeBackend,
@@ -31,6 +35,58 @@ from offline_sft_pipeline.pipelines.scripted_components import (
 
 class OrchestratorV01SmokeTest(unittest.TestCase):
     maxDiff = None
+
+    def test_planner_client_parses_new_json_contract(self) -> None:
+        planner = PlannerClient(
+            backend=FakeTextBackend(
+                stage_responses={
+                    "planner": """{
+  "mode": "suggestions",
+  "think": "The current crop is ambiguous, so I should localize the likely tag region first.",
+  "suggestions": [
+    {
+      "suggestion_id": "s1",
+      "suggestion_cot": "Localize the tag before OCR.",
+      "steps": [
+        {
+          "step_id": "step_1",
+          "step_goal": "Locate the tag region.",
+          "capability_plan": [
+            {
+              "order": 1,
+              "capability": "ground_box",
+              "instruction": "Find the tag region."
+            }
+          ],
+          "executor_instruction": "Use grounding to localize the tag."
+        }
+      ]
+    }
+  ]
+}"""
+                }
+            )
+        )
+        output = planner.run(self._build_planner_request())
+        self.assertFalse(output.can_answer_now)
+        self.assertEqual(
+            output.global_chain_cot,
+            "The current crop is ambiguous, so I should localize the likely tag region first.",
+        )
+        self.assertEqual(output.suggestions[0].suggestion_id, "s1")
+
+    def test_planner_client_keeps_legacy_tag_contract_compatibility(self) -> None:
+        planner = PlannerClient(
+            backend=FakeTextBackend(
+                stage_responses={
+                    "planner": "<think>\nThe visible image already contains the answer.\n</think>\n<answer>\n249\n</answer>"
+                }
+            )
+        )
+        output = planner.run(self._build_planner_request())
+        self.assertTrue(output.can_answer_now)
+        self.assertEqual(output.global_chain_cot, "The visible image already contains the answer.")
+        self.assertEqual(output.direct_answer, "249")
 
     def test_complex_multiround_branching_smoke(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -201,10 +257,7 @@ class OrchestratorV01SmokeTest(unittest.TestCase):
             )
 
     def test_zero_exec_budget_still_allows_direct_answer_and_blocks_expansion(self) -> None:
-        cases = [
-            ("no_child_budget", Budget(remaining_rounds=2, remaining_children=0, remaining_steps=2)),
-            ("no_step_budget", Budget(remaining_rounds=2, remaining_children=2, remaining_steps=0)),
-        ]
+        cases = [("single_round", Budget(remaining_rounds=1))]
         for case_name, budget in cases:
             with self.subTest(case=case_name):
                 with tempfile.TemporaryDirectory() as tmpdir:
@@ -245,7 +298,35 @@ class OrchestratorV01SmokeTest(unittest.TestCase):
                     self.assertEqual(result.all_trajectory_ids, [root_id])
                     self.assertFalse(executor.requests)
                     self.assertFalse(runtime.requests)
-                    self.assertIsNone(planner.requests[0].requested_suggestion_count)
+                    self.assertEqual(planner.requests[0].requested_suggestion_count, 3)
+
+    def _build_planner_request(self) -> PlannerClientRequest:
+        return PlannerClientRequest(
+            sample_id="demo__train__planner_parse",
+            trajectory_id="traj__demo__train__planner_parse__root",
+            round_idx=0,
+            question="What number is written on the hanging tag?",
+            messages=[
+                ConversationMessage(
+                    message_id="m_system",
+                    role="system",
+                    content="You are a helpful planner.",
+                ),
+                ConversationMessage(
+                    message_id="m_user",
+                    role="user",
+                    content="What number is written on the hanging tag?",
+                ),
+            ],
+            visible_images=[
+                ImageArtifactRef(
+                    artifact_id="img_root_0",
+                    path="/tmp/fake_root.png",
+                    media_type="image/png",
+                )
+            ],
+            budget=Budget(remaining_rounds=2),
+        )
 
     def test_client_fake_backend_round_trips_through_real_clients(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -304,10 +385,7 @@ class OrchestratorV01SmokeTest(unittest.TestCase):
             )
 
     def test_zero_exec_budget_without_direct_answer_marks_max_step_reached(self) -> None:
-        cases = [
-            ("no_child_budget", Budget(remaining_rounds=2, remaining_children=0, remaining_steps=2)),
-            ("no_step_budget", Budget(remaining_rounds=2, remaining_children=2, remaining_steps=0)),
-        ]
+        cases = [("zero_depth", Budget(remaining_rounds=0))]
         for case_name, budget in cases:
             with self.subTest(case=case_name):
                 with tempfile.TemporaryDirectory() as tmpdir:
@@ -316,29 +394,7 @@ class OrchestratorV01SmokeTest(unittest.TestCase):
                     sample_id = sample.sample_id
                     root_id = build_root_trajectory_id(sample_id)
 
-                    planner = ScriptedPlannerClient(
-                        {
-                            (root_id, 0): make_planner_output(
-                                sample_id=sample_id,
-                                trajectory_id=root_id,
-                                round_idx=0,
-                                global_chain_cot="Execution budget is exhausted, so only a direct answer decision is allowed here.",
-                                suggestions=[
-                                    make_suggestion(
-                                        "s1",
-                                        "This suggestion should be recorded in planner history but never expanded.",
-                                        [
-                                            make_step(
-                                                "step_blocked",
-                                                "Attempt a blocked execution.",
-                                                ["ocr_assist"],
-                                            )
-                                        ],
-                                    )
-                                ],
-                            )
-                        }
-                    )
+                    planner = ScriptedPlannerClient({})
                     executor = ScriptedExecutorClient({})
                     runtime = ScriptedRuntime({})
                     judge = JudgeClient(backend=ScriptedJudgeBackend({}))
@@ -357,9 +413,9 @@ class OrchestratorV01SmokeTest(unittest.TestCase):
                     self.assertEqual(len(trajectories), 1)
                     self.assertEqual(trajectories[0].status, "max_step_reached")
                     self.assertEqual(result.terminal_trajectory_ids, [root_id])
+                    self.assertFalse(planner.requests)
                     self.assertFalse(executor.requests)
                     self.assertFalse(runtime.requests)
-                    self.assertIsNone(planner.requests[0].requested_suggestion_count)
 
 
 if __name__ == "__main__":
