@@ -268,7 +268,10 @@
         "suggestion_step_index",
         "step_id",
         "step_goal",
+        "input_image",
+        "input_artifact_id",
         "capability_plan",
+        "executor_description",
         "executor_cot_path",
         "executor_code_path",
         "runtime_result_path",
@@ -300,12 +303,27 @@
           "type": "string",
           "minLength": 1
         },
+        "input_image": {
+          "type": "string",
+          "enum": [
+            "root",
+            "current"
+          ]
+        },
+        "input_artifact_id": {
+          "type": "string",
+          "minLength": 1
+        },
         "capability_plan": {
           "type": "array",
           "minItems": 1,
           "items": {
             "$ref": "#/$defs/capabilityPlanItem"
           }
+        },
+        "executor_description": {
+          "type": "string",
+          "minLength": 1
         },
         "executor_cot_path": {
           "type": "string",

@@ -8,6 +8,7 @@
   "required": [
     "cot",
     "code",
+    "description",
     "raw_response_text",
     "metadata"
   ],
@@ -16,6 +17,10 @@
       "type": "string"
     },
     "code": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
       "type": "string",
       "minLength": 1
     },

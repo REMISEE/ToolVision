@@ -30,6 +30,7 @@ DEFAULT_FAKE_PLANNER_TEXT = """{
         {
           "step_id": "step_a",
           "step_goal": "Locate the target object mentioned in the question.",
+          "input_image": "root",
           "capability_plan": [
             {
               "order": 1,
@@ -45,15 +46,16 @@ DEFAULT_FAKE_PLANNER_TEXT = """{
 }
 """
 
-DEFAULT_FAKE_EXECUTOR_TEXT = """<think>
-First localize the relevant target, then crop it for closer inspection and keep the latest image active.
-</think>
-<code>
-box = _call_ground_box("target object")
-crop = _call_dino_crop("target object", image_obj=box["image"], based_on="box", max_crops=1, padding=8)
-print(crop.get("text", ""))
-result = crop["image"]
-</code>
+DEFAULT_FAKE_EXECUTOR_TEXT = """{
+  "think": "First localize the relevant target, then crop it for closer inspection and keep the latest image active.",
+  "tool_call": {
+    "name": "code_image_tool",
+    "arguments": {
+      "code": "box = _call_ground_box(\\"target object\\")\\ncrop = _call_dino_crop(\\"target object\\", image_obj=box[\\"image\\"], based_on=\\"box\\", max_crops=1, padding=8)\\nprint(crop.get(\\"text\\", \\"\\"))\\nresult = crop[\\"image\\"]",
+      "description": "Ground the target object and keep a crop for the next reasoning step."
+    }
+  }
+}
 """
 
 

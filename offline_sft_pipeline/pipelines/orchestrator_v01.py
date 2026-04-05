@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 from pathlib import Path
 from typing import Any, Protocol, Sequence
 
@@ -356,7 +357,11 @@ class OrchestratorV01:
         selected_step = candidate.suggestion.steps[0]
         step_idx = child_trajectory.step_idx + 1
         visible_images = self._select_visible_images(child_trajectory)
-        runtime_image_index = self._select_runtime_image_index(child_trajectory, visible_images)
+        input_artifact, runtime_image_index = self._resolve_runtime_input(
+            child_trajectory,
+            visible_images,
+            selected_step.input_image,
+        )
         messages_doc = self.store.load_messages(child_trajectory.sample_id, child_trajectory.trajectory_id)
 
         try:
@@ -438,6 +443,9 @@ class OrchestratorV01:
             selected_step=selected_step,
             executor_cot=executor_output.cot,
             executor_code=executor_output.code,
+            executor_description=executor_output.description,
+            runtime_image_index=runtime_image_index,
+            input_artifact_id=input_artifact.artifact_id,
             executor_code_path=step_paths.executor_code_path,
         )
         tool_message = self._build_tool_step_message(
@@ -459,7 +467,10 @@ class OrchestratorV01:
             suggestion_step_index=0,
             step_id=selected_step.step_id,
             step_goal=selected_step.step_goal,
+            input_image=selected_step.input_image,
+            input_artifact_id=input_artifact.artifact_id,
             capability_plan=[item.model_copy(deep=True) for item in selected_step.capability_plan],
+            executor_description=executor_output.description,
             executor_cot_path=str(step_paths.executor_cot_path),
             executor_code_path=str(step_paths.executor_code_path),
             runtime_result_path=str(step_paths.runtime_result_path),
@@ -581,14 +592,25 @@ class OrchestratorV01:
         selected_step: PlannerStepSpec,
         executor_cot: str,
         executor_code: str,
+        executor_description: str,
+        runtime_image_index: int,
+        input_artifact_id: str,
         executor_code_path: Path,
     ) -> ConversationMessage:
+        tool_call_payload = {
+            "name": "code_image_tool",
+            "arguments": {
+                "code": executor_code,
+                "description": executor_description,
+                "image_index": runtime_image_index,
+            },
+        }
         return ConversationMessage(
             message_id=f"m_step_{step_idx:03d}_assistant",
             role="assistant",
             content=(
                 f"<think>\n{executor_cot}\n</think>\n"
-                f"<tool_call name=\"code_image_tool\">\n{executor_code}\n</tool_call>"
+                f"<tool_call>\n{json.dumps(tool_call_payload, ensure_ascii=False, indent=2)}\n</tool_call>"
             ),
             image_artifact_ids=[],
             metadata={
@@ -597,6 +619,10 @@ class OrchestratorV01:
                 "planner_round_idx": planner_round_idx,
                 "suggestion_id": suggestion_id,
                 "step_id": selected_step.step_id,
+                "input_image": selected_step.input_image,
+                "input_artifact_id": input_artifact_id,
+                "executor_description": executor_description,
+                "runtime_image_index": runtime_image_index,
                 "executor_code_path": self._path_relative_to_trajectory(
                     child_trajectory.sample_id,
                     child_trajectory.trajectory_id,
@@ -667,20 +693,28 @@ class OrchestratorV01:
         except FileNotFoundError:
             return None
 
-    def _select_runtime_image_index(
+    def _resolve_runtime_input(
         self,
         trajectory: TrajectoryRecord,
         visible_images: Sequence[ImageArtifactRef],
-    ) -> int:
+        input_image: str,
+    ) -> tuple[ImageArtifactRef, int]:
         if not visible_images:
-            return 0
+            raise ValueError("visible_images must not be empty when resolving runtime input.")
+        if input_image == "root":
+            return visible_images[0].model_copy(deep=True), 0
+        if input_image != "current":
+            raise ValueError(f"Unsupported planner-selected input_image={input_image!r}.")
         latest_primary = self._load_latest_primary_image(trajectory)
         if latest_primary is None:
-            return 0
+            raise ValueError("Planner selected input_image='current' but no previous-step image exists.")
         for idx, image in enumerate(visible_images):
             if image.artifact_id == latest_primary.artifact_id:
-                return idx
-        return len(visible_images) - 1
+                return image.model_copy(deep=True), idx
+        raise ValueError(
+            f"Planner selected input_image='current' but artifact {latest_primary.artifact_id!r} "
+            "is not present in visible_images."
+        )
 
     def _load_parent_frontier_score(self, trajectory: TrajectoryRecord) -> float:
         for judge_ref in reversed(trajectory.judge_records):

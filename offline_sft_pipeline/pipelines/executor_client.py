@@ -7,7 +7,10 @@ from typing import Any
 
 from offline_sft_pipeline.core.models import ExecutorStepOutput
 from offline_sft_pipeline.pipelines.backends import TextGenerationBackend
-from offline_sft_pipeline.pipelines.parsing import ensure_tag_order, extract_required_tag
+from offline_sft_pipeline.pipelines.parsing import (
+    ModelResponseParseError,
+    try_parse_executor_json_payload,
+)
 from offline_sft_pipeline.pipelines.request_models import ExecutorClientRequest
 
 PROMPT_ROOT = Path(__file__).resolve().parents[1] / "prompts"
@@ -63,6 +66,8 @@ class ExecutorClient:
             suggestion_step_index=str(request.suggestion_step_index),
             planner_global_chain_cot=request.planner_global_chain_cot or "",
             suggestion_cot=request.suggestion_cot or "",
+            input_image=request.step_spec.input_image,
+            selectable_input_images_json=self._to_pretty_json(self._build_selectable_input_images(request)),
             step_spec_json=self._to_pretty_json(request.step_spec.model_dump(mode="json")),
             messages_json=self._to_pretty_json([item.model_dump(mode="json") for item in request.messages]),
             visible_images_json=self._to_pretty_json([item.model_dump(mode="json") for item in request.visible_images]),
@@ -83,18 +88,93 @@ class ExecutorClient:
         }
 
     def _parse_model_text(self, text: str, *, metadata: dict[str, Any]) -> ExecutorStepOutput:
-        ensure_tag_order(text, stage="executor", first_tag="think", second_tag="code")
-        think = extract_required_tag(text, "think", stage="executor")
-        code = extract_required_tag(text, "code", stage="executor")
+        payload = try_parse_executor_json_payload(text)
+        if payload is None:
+            raise ModelResponseParseError(
+                "Executor output must be a JSON object with think + tool_call.",
+                stage="executor",
+                preview=self._preview_executor(text),
+            )
+
+        think = str(payload.get("think", "")).strip()
+        if not think:
+            raise ModelResponseParseError(
+                "Executor JSON output field 'think' must not be empty.",
+                stage="executor",
+                tag="think",
+                preview=self._preview_executor(text),
+            )
+
+        tool_call = payload.get("tool_call")
+        if not isinstance(tool_call, dict):
+            raise ModelResponseParseError(
+                "Executor JSON output field 'tool_call' must be an object.",
+                stage="executor",
+                tag="tool_call",
+                preview=self._preview_executor(text),
+            )
+        if str(tool_call.get("name", "")).strip() != "code_image_tool":
+            raise ModelResponseParseError(
+                "Executor JSON tool_call.name must be 'code_image_tool'.",
+                stage="executor",
+                tag="tool_call.name",
+                preview=self._preview_executor(text),
+            )
+        arguments = tool_call.get("arguments")
+        if not isinstance(arguments, dict):
+            raise ModelResponseParseError(
+                "Executor JSON tool_call.arguments must be an object.",
+                stage="executor",
+                tag="tool_call.arguments",
+                preview=self._preview_executor(text),
+            )
+        code = str(arguments.get("code", "")).strip()
+        if not code:
+            raise ModelResponseParseError(
+                "Executor JSON tool_call.arguments.code must not be empty.",
+                stage="executor",
+                tag="tool_call.arguments.code",
+                preview=self._preview_executor(text),
+            )
+        description = str(arguments.get("description", "")).strip()
+        if not description:
+            raise ModelResponseParseError(
+                "Executor JSON tool_call.arguments.description must not be empty.",
+                stage="executor",
+                tag="tool_call.arguments.description",
+                preview=self._preview_executor(text),
+            )
         return ExecutorStepOutput(
             cot=think,
             code=code,
+            description=description,
             raw_response_text=text,
             metadata=dict(metadata),
         )
 
     def _to_pretty_json(self, payload: Any) -> str:
         return json.dumps(payload, ensure_ascii=False, indent=2)
+
+    def _build_selectable_input_images(self, request: ExecutorClientRequest) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        total = len(request.visible_images)
+        for idx, image in enumerate(request.visible_images):
+            role = "current" if total >= 2 and idx == total - 1 else "root"
+            label = "latest previous-step image" if role == "current" else "original image"
+            out.append(
+                {
+                    "index": idx,
+                    "role": role,
+                    "label": label,
+                }
+            )
+        return out
+
+    def _preview_executor(self, text: str, *, limit: int = 500) -> str:
+        normalized = " ".join(text.strip().split())
+        if len(normalized) <= limit:
+            return normalized
+        return normalized[:limit] + "..."
 
 
 __all__ = [

@@ -254,6 +254,7 @@ suggestions must be valid JSON array:
       {
         "step_id": "step_1",
         "step_goal": "...",
+        "input_image": "root",
         "capability_plan": [
           {
             "order": 1,
@@ -277,6 +278,13 @@ Only use capability names listed in the user prompt.
 Do NOT invent capability names.
 
 Each step must be executable.
+
+Each step must specify `input_image`:
+
+- `root`: start the next executor step from the original image
+- `current`: start the next executor step from the latest previous-step image
+
+Use `current` only when such a previous-step image already exists in the current trajectory.
 
 Keep plans short and high-value given remaining budget.
 

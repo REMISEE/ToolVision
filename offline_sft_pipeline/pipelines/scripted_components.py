@@ -68,11 +68,13 @@ def make_step(
     step_goal: str,
     capability_names: list[str],
     *,
+    input_image: str = "root",
     executor_instruction: str | None = None,
 ) -> PlannerStepSpec:
     return PlannerStepSpec(
         step_id=step_id,
         step_goal=step_goal,
+        input_image=input_image,
         capability_plan=[
             CapabilityPlanItem(
                 order=index,
@@ -119,11 +121,23 @@ def make_planner_output(
     )
 
 
-def make_executor_output(cot: str, code: str) -> ExecutorStepOutput:
+def make_executor_output(cot: str, code: str, *, description: str | None = None) -> ExecutorStepOutput:
+    tool_description = description or "Execute the planned image-processing step."
+    raw_payload = {
+        "think": cot,
+        "tool_call": {
+            "name": "code_image_tool",
+            "arguments": {
+                "code": code,
+                "description": tool_description,
+            },
+        },
+    }
     return ExecutorStepOutput(
         cot=cot,
         code=code,
-        raw_response_text=f"<think>\n{cot}\n</think>\n<code>\n{code}\n</code>",
+        description=tool_description,
+        raw_response_text=json.dumps(raw_payload, ensure_ascii=False, indent=2),
         metadata={"backend": "scripted_executor"},
     )
 
@@ -146,7 +160,20 @@ def render_planner_output_as_model_text(planner_output: PlannerOutput) -> str:
 def render_executor_output_as_model_text(executor_output: ExecutorStepOutput) -> str:
     if executor_output.raw_response_text and executor_output.raw_response_text.strip():
         return executor_output.raw_response_text
-    return f"<think>\n{executor_output.cot}\n</think>\n<code>\n{executor_output.code}\n</code>"
+    return json.dumps(
+        {
+            "think": executor_output.cot,
+            "tool_call": {
+                "name": "code_image_tool",
+                "arguments": {
+                    "code": executor_output.code,
+                    "description": executor_output.description,
+                },
+            },
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
 
 
 class ScriptedPlannerClient:
@@ -491,6 +518,7 @@ def build_three_round_demo_spec(
                                 "step_crop_tag",
                                 "Localize the tag and keep a clean crop for later inspection.",
                                 ["ground_box", "dino_crop"],
+                                input_image="root",
                             )
                         ],
                     ),
@@ -502,6 +530,7 @@ def build_three_round_demo_spec(
                                 "step_crop_serial",
                                 "Ground the tag and crop the likely number region.",
                                 ["ground_box", "dino_crop"],
+                                input_image="root",
                             )
                         ],
                     ),
@@ -513,6 +542,7 @@ def build_three_round_demo_spec(
                                 "step_mask_then_ocr",
                                 "Mask the candidate region and read the visible text.",
                                 ["sam_mask", "ocr_assist"],
+                                input_image="root",
                             )
                         ],
                     ),
@@ -542,6 +572,7 @@ def build_three_round_demo_spec(
                                 "step_continue_ocr",
                                 "Continue with OCR on the latest crop.",
                                 ["ocr_assist"],
+                                input_image="current",
                             )
                         ],
                     ),
@@ -553,6 +584,7 @@ def build_three_round_demo_spec(
                                 "step_reground_then_ocr",
                                 "Reground the tag, recrop it, and OCR the new crop.",
                                 ["ground_box", "dino_crop", "ocr_assist"],
+                                input_image="root",
                             )
                         ],
                     ),
@@ -575,6 +607,7 @@ def build_three_round_demo_spec(
                                 "step_retry_mask_path",
                                 "Retry the masked region with another visual pass.",
                                 ["sam_mask", "dino_crop"],
+                                input_image="current",
                             )
                         ],
                     ),
@@ -586,6 +619,7 @@ def build_three_round_demo_spec(
                                 "step_switch_strategy",
                                 "Switch away from the mask and reground the tag.",
                                 ["ground_box", "dino_crop"],
+                                input_image="root",
                             )
                         ],
                     ),
@@ -612,6 +646,7 @@ def build_three_round_demo_spec(
                                 "step_final_ocr",
                                 "Run one final OCR pass on the refreshed crop.",
                                 ["ocr_assist"],
+                                input_image="current",
                             )
                         ],
                     )

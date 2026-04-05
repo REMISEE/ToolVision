@@ -8,9 +8,15 @@ These are exactly:
 
 This matches the ``TextGenerationBackend.generate(..., system_prompt=..., user_prompt=...)`` contract.
 
-Note: ``ApiTextBackend`` **does not** POST this ``user_prompt`` string as-is; it rebuilds OpenAI
-``messages`` from ``context["request"]`` via ``planner_to_openai_messages``. Use ``--openai-messages``
-only when you need that HTTP-shaped payload.
+Warning: ``ApiTextBackend`` **does not** POST this ``user_prompt`` string as-is. It rebuilds
+OpenAI-style ``messages`` from ``context["request"]`` via ``planner_to_openai_messages``.
+So this script is for:
+
+- checking template substitution
+- checking what ``PlannerClient`` passes into ``backend.generate(...)``
+
+It is NOT, by default, the real HTTP payload. Use ``--openai-messages`` for that, or use
+``run_single_real_planner_call.py`` for a single real planner API round-trip without orchestrator.
 
 Usage::
 
@@ -127,15 +133,15 @@ def main() -> None:
                 f"system_prompt_path: {pc.system_prompt_path}",
                 f"user_prompt_path: {pc.user_prompt_path}",
                 "",
-                "========== system_prompt (passed to backend.generate) ==========",
+                "========== system_prompt (template passed to backend.generate) ==========",
                 system_prompt,
                 "",
-                "========== user_prompt (passed to backend.generate) ==========",
+                "========== user_prompt (template passed to backend.generate; NOT the final HTTP payload) ==========",
                 user_prompt,
                 "",
                 "========== note ==========",
                 "ApiTextBackend ignores this user_prompt for HTTP; it builds messages[] from context['request'].",
-                "Use --openai-messages to print that payload.",
+                "Use --openai-messages to print that payload, or run run_single_real_planner_call.py.",
             ]
         )
         text = "\n".join(out_lines)

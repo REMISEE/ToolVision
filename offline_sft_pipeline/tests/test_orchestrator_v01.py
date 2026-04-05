@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,7 +8,9 @@ from pathlib import Path
 from offline_sft_pipeline.core.models import (
     Budget,
     ConversationMessage,
+    CapabilityPlanItem,
     ImageArtifactRef,
+    PlannerStepSpec,
     build_child_trajectory_id,
     build_root_trajectory_id,
 )
@@ -17,7 +20,7 @@ from offline_sft_pipeline.pipelines.executor_client import ExecutorClient
 from offline_sft_pipeline.pipelines.judge_client import JudgeClient
 from offline_sft_pipeline.pipelines.orchestrator_v01 import OrchestratorConfig, OrchestratorV01
 from offline_sft_pipeline.pipelines.planner_client import PlannerClient
-from offline_sft_pipeline.pipelines.request_models import PlannerClientRequest
+from offline_sft_pipeline.pipelines.request_models import ExecutorClientRequest, PlannerClientRequest, ToolCapability
 from offline_sft_pipeline.pipelines.scripted_components import (
     ScriptedExecutorClient,
     ScriptedJudgeBackend,
@@ -51,6 +54,7 @@ class OrchestratorV01SmokeTest(unittest.TestCase):
         {
           "step_id": "step_1",
           "step_goal": "Locate the tag region.",
+          "input_image": "root",
           "capability_plan": [
             {
               "order": 1,
@@ -87,6 +91,30 @@ class OrchestratorV01SmokeTest(unittest.TestCase):
         self.assertTrue(output.can_answer_now)
         self.assertEqual(output.global_chain_cot, "The visible image already contains the answer.")
         self.assertEqual(output.direct_answer, "249")
+
+    def test_executor_client_parses_json_tool_call_contract(self) -> None:
+        executor = ExecutorClient(
+            backend=FakeTextBackend(
+                stage_responses={
+                    "executor": json.dumps(
+                        {
+                            "think": "Start from the current crop and run OCR directly.",
+                            "tool_call": {
+                                "name": "code_image_tool",
+                                "arguments": {
+                                    "code": 'ocr = _call_ocr_assist(image_obj=image)\nprint(ocr.get("text", ""))\nresult = image',
+                                    "description": "Run OCR on the current crop and keep it active.",
+                                },
+                            },
+                        }
+                    )
+                }
+            )
+        )
+        output = executor.run(self._build_executor_request())
+        self.assertEqual(output.cot, "Start from the current crop and run OCR directly.")
+        self.assertIn("_call_ocr_assist", output.code)
+        self.assertEqual(output.description, "Run OCR on the current crop and keep it active.")
 
     def test_complex_multiround_branching_smoke(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -160,6 +188,8 @@ class OrchestratorV01SmokeTest(unittest.TestCase):
             )
             self.assertIn("_call_ground_box", messages_s2[2].content)
             self.assertIn("_call_dino_crop", messages_s2[2].content)
+            self.assertIn('"name": "code_image_tool"', messages_s2[2].content)
+            self.assertIn('"image_index": 0', messages_s2[2].content)
             self.assertEqual(messages_s2[3].content, "cropped serial region")
 
             messages_s21 = store.load_messages(sample_id, traj_s21).root
@@ -235,6 +265,8 @@ class OrchestratorV01SmokeTest(unittest.TestCase):
                 executor_requests[(traj_s22, 2)].suggestion_cot,
                 "Revisit the earlier crop by grounding again, then OCR the refreshed view.",
             )
+            self.assertEqual(executor_requests[(traj_s21, 2)].step_spec.input_image, "current")
+            self.assertEqual(executor_requests[(traj_s22, 2)].step_spec.input_image, "root")
 
             runtime_requests = {
                 (request.trajectory_id, request.step_idx): request
@@ -242,7 +274,13 @@ class OrchestratorV01SmokeTest(unittest.TestCase):
             }
             self.assertEqual(runtime_requests[(traj_s1, 1)].image_index, 0)
             self.assertEqual(runtime_requests[(traj_s21, 2)].image_index, 1)
-            self.assertEqual(runtime_requests[(traj_s22, 2)].image_index, 1)
+            self.assertEqual(runtime_requests[(traj_s22, 2)].image_index, 0)
+
+            self.assertEqual(trajectories[traj_s21].steps[-1].input_image, "current")
+            self.assertEqual(trajectories[traj_s21].steps[-1].input_artifact_id, "img_step_001_0")
+            self.assertTrue(trajectories[traj_s21].steps[-1].executor_description)
+            self.assertEqual(trajectories[traj_s22].steps[-1].input_image, "root")
+            self.assertEqual(trajectories[traj_s22].steps[-1].input_artifact_id, "img_root_0")
 
             runtime_result_s31 = store.load_runtime_result(sample_id, traj_s31, 2)
             self.assertFalse(runtime_result_s31.success)
@@ -383,6 +421,56 @@ class OrchestratorV01SmokeTest(unittest.TestCase):
                 [item["stage"] for item in text_backend.requests[:4]],
                 ["planner", "executor", "executor", "executor"],
             )
+
+    def _build_executor_request(self) -> ExecutorClientRequest:
+        return ExecutorClientRequest(
+            sample_id="demo__train__executor_parse",
+            trajectory_id="traj__demo__train__executor_parse__r001_s1",
+            round_idx=1,
+            step_idx=2,
+            question="What number is written on the hanging tag?",
+            messages=[
+                ConversationMessage(
+                    message_id="m_user",
+                    role="user",
+                    content="What number is written on the hanging tag?",
+                ),
+                ConversationMessage(
+                    message_id="m_tool",
+                    role="tool",
+                    content="cropped serial region",
+                    image_artifact_ids=["img_step_001_0"],
+                ),
+            ],
+            visible_images=[
+                ImageArtifactRef(
+                    artifact_id="img_root_0",
+                    path="/tmp/fake_root.png",
+                    media_type="image/png",
+                ),
+                ImageArtifactRef(
+                    artifact_id="img_step_001_0",
+                    path="/tmp/fake_step.png",
+                    media_type="image/png",
+                ),
+            ],
+            suggestion_id="s21",
+            suggestion_step_index=0,
+            step_spec=PlannerStepSpec(
+                step_id="step_continue_ocr",
+                step_goal="Continue with OCR on the latest crop.",
+                input_image="current",
+                capability_plan=[
+                    CapabilityPlanItem(order=1, capability="ocr_assist", instruction="Read the text from the crop.")
+                ],
+                executor_instruction="Run OCR on the latest crop and keep the crop as result.",
+            ),
+            planner_global_chain_cot="The previous crop already isolates the right region.",
+            suggestion_cot="Continue from the previous crop and OCR it directly.",
+            tool_capabilities=[
+                ToolCapability(name="ocr_assist", description="Read text from the current image.")
+            ],
+        )
 
     def test_zero_exec_budget_without_direct_answer_marks_max_step_reached(self) -> None:
         cases = [("zero_depth", Budget(remaining_rounds=0))]

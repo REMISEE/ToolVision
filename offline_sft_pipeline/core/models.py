@@ -228,6 +228,7 @@ class CapabilityPlanItem(PipelineBaseModel):
 class PlannerStepSpec(PipelineBaseModel):
     step_id: str
     step_goal: str
+    input_image: Literal["root", "current"]
     capability_plan: list[CapabilityPlanItem]
     executor_instruction: str
 
@@ -283,13 +284,16 @@ class ExecutorStepOutput(SchemaBackedModel):
 
     cot: str = ""
     code: str
+    description: str
     raw_response_text: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _validate_code(self) -> "ExecutorStepOutput":
+    def _validate_fields(self) -> "ExecutorStepOutput":
         if not self.code.strip():
             raise ValueError("ExecutorStepOutput.code must not be empty.")
+        if not self.description.strip():
+            raise ValueError("ExecutorStepOutput.description must not be empty.")
         return self
 
 
@@ -401,7 +405,10 @@ class StepRecord(PipelineBaseModel):
     suggestion_step_index: int
     step_id: str
     step_goal: str
+    input_image: Literal["root", "current"]
+    input_artifact_id: str
     capability_plan: list[CapabilityPlanItem]
+    executor_description: str
     executor_cot_path: str
     executor_code_path: str
     runtime_result_path: str

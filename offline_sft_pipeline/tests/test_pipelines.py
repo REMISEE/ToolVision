@@ -25,8 +25,9 @@ from offline_sft_pipeline.pipelines.backends import (
     ApiTextBackendConfig,
     BackendResponse,
 )
+from offline_sft_pipeline.pipelines.executor_client import ExecutorClient
 from offline_sft_pipeline.pipelines.planner_client import PlannerClient
-from offline_sft_pipeline.pipelines.request_models import PlannerClientRequest
+from offline_sft_pipeline.pipelines.request_models import ExecutorClientRequest, PlannerClientRequest, ToolCapability
 from offline_sft_pipeline.pipelines.tool_capabilities_io import load_tool_capabilities_from_file
 
 _EXAMPLE_DIR = Path(__file__).resolve().parents[1] / "example"
@@ -219,6 +220,7 @@ class TestPlannerClientParsing(unittest.TestCase):
                                 {
                                     "step_id": "a",
                                     "step_goal": "g",
+                                    "input_image": "root",
                                     "capability_plan": [
                                         {"order": 1, "capability": "ground_box", "instruction": "i"}
                                     ],
@@ -257,6 +259,57 @@ class TestPlannerClientParsing(unittest.TestCase):
             out = PlannerClient(backend=_B()).run(req)
         self.assertTrue(out.can_answer_now)
         self.assertEqual(out.direct_answer, "x")
+
+
+class TestExecutorClientParsing(unittest.TestCase):
+    def test_json_tool_call_contract(self) -> None:
+        class _B:
+            def generate(self, **kwargs: object) -> BackendResponse:
+                return BackendResponse(
+                    text=json.dumps(
+                        {
+                            "think": "Use the planner-selected current image and OCR it directly.",
+                            "tool_call": {
+                                "name": "code_image_tool",
+                                "arguments": {
+                                    "code": 'ocr = _call_ocr_assist(image_obj=image)\nprint(ocr.get("text", ""))\nresult = image',
+                                    "description": "Run OCR on the current image and preserve it as the result.",
+                                },
+                            },
+                        }
+                    ),
+                    metadata={},
+                )
+
+        req = ExecutorClientRequest(
+            sample_id="s1",
+            trajectory_id="t1",
+            round_idx=1,
+            step_idx=2,
+            question="What number is written on the hanging tag?",
+            messages=[
+                ConversationMessage(message_id="m_user", role="user", content="What number is written on the hanging tag?"),
+            ],
+            visible_images=[
+                ImageArtifactRef(artifact_id="img_root_0", path="/tmp/root.png", media_type="image/png"),
+                ImageArtifactRef(artifact_id="img_step_001_0", path="/tmp/step.png", media_type="image/png"),
+            ],
+            suggestion_id="s1",
+            suggestion_step_index=0,
+            step_spec={
+                "step_id": "step_ocr",
+                "step_goal": "Run OCR on the current crop.",
+                "input_image": "current",
+                "capability_plan": [{"order": 1, "capability": "ocr_assist", "instruction": "Read the crop text."}],
+                "executor_instruction": "Run OCR on the current crop.",
+            },
+            planner_global_chain_cot="Use the crop from the previous step.",
+            suggestion_cot="Continue from the crop.",
+            tool_capabilities=[ToolCapability(name="ocr_assist", description="Read text from the current image.")],
+        )
+        out = ExecutorClient(backend=_B()).run(req)
+        self.assertEqual(out.description, "Run OCR on the current image and preserve it as the result.")
+        self.assertIn("_call_ocr_assist", out.code)
 
 
 class TestApiTextBackend(unittest.TestCase):

@@ -16,6 +16,12 @@ $planner_global_chain_cot
 Selected suggestion rationale:
 $suggestion_cot
 
+Planner-selected default input image for this step:
+$input_image
+
+Selectable input images for this step:
+$selectable_input_images_json
+
 Current step spec:
 $step_spec_json
 
@@ -28,4 +34,11 @@ $messages_json
 Available capabilities:
 $tool_capabilities_json
 
-Return <think> first, then <code>.
+Rules for image use:
+- `root` means start from the original image.
+- `current` means start from the latest previous-step image.
+- The planner-selected image above will already be bound as the default `image` / `img` for your first operation.
+- If you want to keep processing a helper output within the same step, prefer `image_obj=prev["image"]`.
+- End by assigning the final image to `result`.
+
+Return one JSON object with `think` and `tool_call`.

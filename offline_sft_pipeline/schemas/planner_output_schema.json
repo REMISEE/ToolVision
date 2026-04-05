@@ -135,6 +135,7 @@
       "required": [
         "step_id",
         "step_goal",
+        "input_image",
         "capability_plan",
         "executor_instruction"
       ],
@@ -146,6 +147,13 @@
         "step_goal": {
           "type": "string",
           "minLength": 1
+        },
+        "input_image": {
+          "type": "string",
+          "enum": [
+            "root",
+            "current"
+          ]
         },
         "capability_plan": {
           "type": "array",

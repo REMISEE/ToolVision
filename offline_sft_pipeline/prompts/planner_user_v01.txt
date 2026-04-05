@@ -12,6 +12,11 @@ $question
 Current visible images:
 $visible_images_json
 
+Image-selection rule for the next executor step:
+- `root` means use the original image as the default starting image.
+- `current` means use the latest previous-step image as the default starting image.
+- If no previous-step image exists yet, do not choose `current`.
+
 Conversation history:
 $messages_json
 
