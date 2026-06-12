@@ -1,0 +1,93 @@
+tools:
+  - class_name: "verl.tools.code_image_tool.CodeImageTool"
+    config:
+      type: native
+      num_workers: 20
+      rate_limit: 50
+      timeout: 30
+      max_code_length: 2048
+      enable_global_rate_limit: true
+      enable_external_model_functions: true
+      external_call_mode: "service"
+      ocr_model_name: "paddleocr"
+      external_services:
+        paddleocr:
+          base_url: "http://127.0.0.1:8080"
+          request_timeout: 180
+          default_file_type: 1
+          use_doc_orientation_classify: false
+          use_doc_unwarping: false
+          use_textline_orientation: true
+          text_det_limit_side_len: 960
+          text_det_limit_type: "max"
+          text_det_thresh: 0.4
+          text_det_box_thresh: 0.7
+          text_rec_score_thresh: 0.6
+          return_word_box: false
+          visualize: true
+          line_y_threshold: 0.6
+        paddleocr_vl:
+          serving_base_url: "http://127.0.0.1:8080"
+          request_timeout: 180
+          default_file_type: 1
+          visualize: false
+          restructure_pages: false
+        grounded_sam2:
+          base_url: "http://127.0.0.1:8081"
+          request_timeout: 180
+        depth:
+          base_url: "http://127.0.0.1:8082"
+          request_timeout: 180
+        countgd:
+          base_url: "http://127.0.0.1:8083"
+          request_timeout: 180
+    tool_schema:
+      type: "function"
+      function:
+        name: "code_image_tool"
+        description: "A unified tool for targeted image inspection using executable Python code. It supports PIL/cv2/numpy image operations and external helper functions for OCR, object localization, segmentation-based highlighting, depth estimation, and counting. The 'draw' variable provides drawing capabilities."
+        parameters:
+          type: "object"
+          properties:
+            code:
+              type: "string"
+              description: |
+                Python code to inspect or process the image. Use 'image' or 'img' for input, and 'draw' for drawing. Do not read images from files or URLs; directly use the provided 'image' or 'img' variable. Return a PIL Image object by assigning it to 'result' or 'output'. All helpers return a dict with keys "image", "images", "text", and "meta"; use helper["image"] as the main returned image when you want to pass the helper observation back. Coordinates are (x_min, y_min, x_max, y_max) in image pixel space.
+
+                Choose the operation according to the evidence needed:
+                - OCR assist: ocr = _call_ocr_assist(); print(ocr["text"]); result = ocr["image"]
+                  Use this for text-heavy images, small text, dense text, charts with hard-to-read labels, forms, documents, or OCR-style questions.
+                - Count assist: count = _call_count_assist("car", confidence_thresh=0.23, visualize="heatmap"); print(count["meta"].get("count")); result = count["image"]
+                  Use this when the question asks how many instances of a described object are present.
+                - Manual crop: crop = _call_manual_crop(120, 80, 260, 180, padding=4); result = crop["image"]
+                  Use this when a known local region needs a closer view.
+                - Dino crop: crop = _call_dino_crop("car tire", max_crops=1, padding=8); result = crop["image"]
+                  Use this when an automatic object-focused crop from a short text description would help inspect the object.
+                - Ground box: box = _call_ground_box("car tire"); result = box["image"]
+                  Use this when you need to localize an object from a short text description.
+                - SAM mask: mask = _call_sam_mask("car tire", multimask_output=True); result = mask["image"]
+                  Use this when a highlighted mask helps inspect the target region more clearly.
+                - Blur background: blur = _call_blur_bg("car", blur_radius=8.0); result = blur["image"]
+                  Use this when suppressing background clutter helps isolate the foreground object.
+                - Manual depth: depth = _call_manual_depth(120, 80, 260, 180, stat="median", label="target"); result = depth["image"]
+                  Use this when you already know the region and need a depth estimate for it.
+                - Ground depth: depth = _call_ground_depth("car", detection_index=0, stat="median"); result = depth["image"]
+                  Use this when you need grounding first and then depth measurement for the grounded object.
+                - Manual box: box = _call_manual_box(120, 80, 260, 180, label="target"); result = box["image"]
+                  Use this when you already know exact coordinates and want to mark a region.
+
+                Basic image operations:
+                - Rotate: result = image.rotate(angle, expand=True)
+                - Flip: result = ImageOps.flip(image) or ImageOps.mirror(image)
+                - Brightness: result = ImageEnhance.Brightness(image).enhance(factor)
+                - Contrast: result = ImageEnhance.Contrast(image).enhance(factor)
+
+                You can combine PIL, NumPy, OpenCV, math libraries, and helper functions when useful. Select the simplest targeted operation that reveals the evidence needed for the specific question.
+            description:
+              type: "string"
+              description: "Clear description of what the code does. For example, 'Run OCR on dense chart labels', 'Crop the legend region', 'Count the cars with count assist', or 'Localize the car tire'."
+            image_index:
+              type: "integer"
+              minimum: 0
+              description: "Index of the visible image timeline to process (0-based). Root images come first, and each successful tool-returned image is appended for later steps."
+          required: ["code", "description", "image_index"]

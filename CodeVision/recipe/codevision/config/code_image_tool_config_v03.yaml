@@ -1,0 +1,131 @@
+# =============================================================================
+# code_image_tool_config_v03.yaml  (modified 2026-05-24)
+#
+# 改动目的：防止模型把工具示例里的具体物体名/坐标当成"标准答案"复读，
+# 改用占位符（<target_object>、<x_min> 等）+ 明确的占位符使用说明，
+# 强制模型用当前图像和问题推导出来的真实值替换占位符。
+#
+# 原始未改动版本已备份在: code_image_tool_config_v03.original.yaml
+#
+# 改动概览：
+# 1. tool_schema.function.description 改为 multi-line block scalar (`|`)，
+#    在原描述后追加两段：
+#      - "Coordinate system: ..." 说明坐标系统（绝对像素 + (x_min,y_min,x_max,y_max)）
+#      - "IMPORTANT: ... PLACEHOLDERS ..." 说明 <...> 是占位符不可照抄
+# 2. code.description 的 12 个工具示例中，所有具体物体名（"car"、"car tire"）
+#    替换为 <target_object> / <object_description> / <foreground_object>；
+#    所有具体坐标 (120, 80, 260, 180 等) 替换为
+#    <x_min>, <y_min>, <x_max>, <y_max> / <x>, <y> / <x1>, <y1>, <x2>, <y2>；
+#    所有 label 中的 "target"/"reference" 替换为
+#    <region_label> / <point_label> / <line_label>。
+# 3. 保留不变：
+#    - OCR assist 示例（无可变参数）
+#    - 所有数值/枚举默认参数：confidence_thresh=0.23、padding、max_crops、
+#      blur_radius、radius、width、detection_index、stat、visualize、
+#      multimask_output、outline、fill 等
+#    - Basic image operations 段落、description 末尾段落
+#    - description 参数和 image_index 参数定义
+#    - tools class_name、config、external_services 配置
+# =============================================================================
+tools:
+  - class_name: "verl.tools.code_image_tool.CodeImageTool"
+    config:
+      type: native
+      num_workers: 20
+      rate_limit: 50
+      timeout: 30
+      max_code_length: 2048
+      enable_global_rate_limit: true
+      enable_external_model_functions: true
+      external_call_mode: "service"
+      ocr_model_name: "paddleocr"
+      external_services:
+        paddleocr:
+          base_url: "http://127.0.0.1:8080"
+          request_timeout: 180
+          default_file_type: 1
+          use_doc_orientation_classify: false
+          use_doc_unwarping: false
+          use_textline_orientation: true
+          text_det_limit_side_len: 960
+          text_det_limit_type: "max"
+          text_det_thresh: 0.4
+          text_det_box_thresh: 0.7
+          text_rec_score_thresh: 0.6
+          return_word_box: false
+          visualize: true
+          line_y_threshold: 0.6
+        paddleocr_vl:
+          serving_base_url: "http://127.0.0.1:8080"
+          request_timeout: 180
+          default_file_type: 1
+          visualize: false
+          restructure_pages: false
+        grounded_sam2:
+          base_url: "http://127.0.0.1:8081"
+          request_timeout: 180
+        depth:
+          base_url: "http://127.0.0.1:8082"
+          request_timeout: 180
+        countgd:
+          base_url: "http://127.0.0.1:8083"
+          request_timeout: 180
+    tool_schema:
+      type: "function"
+      function:
+        name: "code_image_tool"
+        description: |
+          A unified tool for targeted image inspection using executable Python code. It supports PIL/cv2/numpy image operations and external helper functions for OCR, object localization, segmentation-based highlighting, depth estimation, and counting. The 'draw' variable provides drawing capabilities.
+
+          Coordinate system: All coordinates are absolute pixel values in the original image, in the format (x_min, y_min, x_max, y_max) with (0, 0) at the top-left corner.
+
+          IMPORTANT: In the examples below, tokens in angle brackets (e.g. <target_object>, <x_min>, <region_label>) are PLACEHOLDERS showing call syntax only. Replace every placeholder with values derived from the current image and question. Do not copy placeholder tokens verbatim into actual tool calls.
+        parameters:
+          type: "object"
+          properties:
+            code:
+              type: "string"
+              description: |
+                Python code to process the image. Use 'image' or 'img' for input, 'draw' for drawing. Important: Do not read image from file or URL, directly use the 'image' or 'img' variable. Return PIL Image object and save the result to 'result' or 'output' variable. All helpers return a dict with keys "image", "images", "text", and "meta". Use helper["image"] as the main returned image. Coordinates are (x_min, y_min, x_max, y_max) in image pixel space.
+
+                Choose the operation according to the evidence needed:
+                - OCR assist: ocr = _call_ocr_assist(); print(ocr["text"]); result = ocr["image"]
+                  Use this for text-heavy images, small text, dense text, charts with hard-to-read labels, forms, documents, or OCR-style questions.
+                - Count assist: count = _call_count_assist("<object_description>", confidence_thresh=0.23, visualize="heatmap"); print(count["meta"].get("count")); result = count["image"]
+                  Use this when the question asks how many instances of a described object are present.
+                - Manual crop: crop = _call_manual_crop(<x_min>, <y_min>, <x_max>, <y_max>, padding=4); result = crop["image"]
+                  Use this when a known local region needs a closer view.
+                - Dino crop: crop = _call_dino_crop("<target_object>", max_crops=1, padding=8); result = crop["image"]
+                  Use this when an automatic object-focused crop from a short text description would help inspect the object.
+                - Ground box: box = _call_ground_box("<target_object>"); result = box["image"]
+                  Use this when you need to localize an object from a short text description.
+                - SAM mask: mask = _call_sam_mask("<target_object>", multimask_output=True); result = mask["image"]
+                  Use this when a highlighted mask helps inspect the target region more clearly.
+                - Blur background: blur = _call_blur_bg("<foreground_object>", blur_radius=8.0); result = blur["image"]
+                  Use this when suppressing background clutter helps isolate the foreground object.
+                - Manual depth: depth = _call_manual_depth(<x_min>, <y_min>, <x_max>, <y_max>, stat="median", label="<region_label>"); result = depth["image"]
+                  Use this when you already know the region and need a depth estimate for it.
+                - Ground depth: depth = _call_ground_depth("<target_object>", detection_index=0, stat="median"); result = depth["image"]
+                  Use this when you need grounding first and then depth measurement for the grounded object.
+                - Manual box: box = _call_manual_box(<x_min>, <y_min>, <x_max>, <y_max>, label="<region_label>"); result = box["image"]
+                  Use this when you already know exact coordinates and want to mark a region.
+                - Draw point: point = _call_draw_point(<x>, <y>, radius=5, outline="red", fill="red", label="<point_label>"); result = point["image"]
+                  Use this when a precise location, endpoint, center, intersection, or other point-like evidence needs to be marked or checked.
+                - Draw line: line = _call_draw_line(<x1>, <y1>, <x2>, <y2>, fill="red", width=3, label="<line_label>"); result = line["image"]
+                  Use this when a boundary, alignment, direction, distance, connection, or other line-like evidence needs to be marked or checked.
+
+                Basic image operations:
+                - Rotate: result = image.rotate(angle, expand=True)
+                - Flip: result = ImageOps.flip(image) or ImageOps.mirror(image)
+                - Brightness: result = ImageEnhance.Brightness(image).enhance(factor)
+                - Contrast: result = ImageEnhance.Contrast(image).enhance(factor)
+
+                You can combine PIL, NumPy, OpenCV, math libraries, and helper functions when useful. Select the simplest targeted operation that reveals the evidence needed for the specific question.
+            description:
+              type: "string"
+              description: "Clear description of what the code does. For example, 'Run OCR on dense chart labels', 'Crop the legend region', 'Count the requested objects with count assist', or 'Localize the requested target object'."
+            image_index:
+              type: "integer"
+              minimum: 0
+              description: "Index of the visible image timeline to process (0-based). Root images come first, and each successful tool-returned image is appended for later steps."
+          required: ["code", "description", "image_index"]

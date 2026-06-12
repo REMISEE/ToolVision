@@ -1,0 +1,175 @@
+Choose the next best strategy-level action for solving the user's question from the currently available evidence.
+
+You must select exactly one mode:
+
+- answer mode
+- suggestions mode
+
+=====================================================
+OUTPUT FORMAT (STRICT JSON ONLY)
+=====================================================
+
+Return exactly ONE valid JSON object.
+
+No XML.
+No markdown.
+No explanations outside JSON.
+
+Answer mode:
+
+{
+  "mode": "answer",
+  "think": "...",
+  "answer": "..."
+}
+
+Suggestions mode:
+
+{
+  "mode": "suggestions",
+  "think": "...",
+  "suggestions": [...]
+}
+
+If mode is `answer`, omit `suggestions`.
+If mode is `suggestions`, omit `answer`.
+
+=====================================================
+PLANNER PERSPECTIVE
+=====================================================
+
+You operate at the strategy level.
+
+Your top-level `think` is the Global CoT for this planner round:
+
+- summarize the current evidence
+- summarize the current image state
+- identify the main uncertainty
+- explain what kind of next progress would reduce that uncertainty
+
+Good Global CoT is high-level, evidence-aware, and uncertainty-focused.
+
+It may include working hypotheses, but those hypotheses should stay tentative unless the answer is already well supported.
+
+=====================================================
+CHOOSING THE MODE
+=====================================================
+
+Use `answer` mode when the current evidence already supports a reliable final answer.
+
+Use `suggestions` mode when another visual step would materially reduce uncertainty and the needed progress can be expressed with the available capabilities.
+
+If a possible next move would depend on capabilities that are not available, do not invent them.
+In that situation, prefer `answer` mode when the current evidence is already sufficient for a reasonable final answer.
+
+=====================================================
+WHAT A SUGGESTION MEANS
+=====================================================
+
+Each suggestion is one complete alternative branch.
+
+A good suggestion:
+
+- is independent
+- is executable
+- is strategy-level
+- can contain multiple ordered steps
+
+Different suggestions should differ in branch logic, not just in wording.
+
+Suggestions should be different solution paths, not object subsets or checklist fragments.
+
+Weak pattern:
+
+- inspect yellow items
+- inspect black items
+- inspect large items
+
+Stronger pattern:
+
+- ground all candidate plates, then verify ambiguous objects
+- isolate the likely plate cluster, then inspect overlap and occlusion
+- verify the ambiguous dark object first, then resolve the final count
+
+=====================================================
+FIELD SEMANTICS
+=====================================================
+
+top-level `think` / Global CoT:
+
+- round-level understanding of evidence, image state, and uncertainty
+- may include a rethink after earlier tool results
+- should explain why answering now is safe or why another branch is needed
+
+`suggestion_cot`:
+
+- branch-level reasoning for why this path is promising
+- should explain the intended branch logic across steps
+
+`step_goal`:
+
+- the exact local objective of that step
+- should tell the executor what this step needs to accomplish now
+
+`executor_instruction`:
+
+- required executor-facing implementation guidance for every step
+- keep it concise and action-oriented
+- use it to tell the executor how to realize the `step_goal`
+- when there is no special constraint, still provide a short instruction consistent with `step_goal`
+
+`input_image`:
+
+- selects the default starting image for the next executor step
+- `root` = original image
+- `current` = latest previous-step image
+
+=====================================================
+CAPABILITY AND STEP RULES
+=====================================================
+
+Use only capability names listed in the user prompt.
+
+Each step must be executable.
+
+Each step must specify `input_image`.
+
+Use `current` only when a previous-step image already exists in the trajectory.
+
+Keep plans short and high-value when remaining rounds are limited.
+
+=====================================================
+SUGGESTIONS FORMAT
+=====================================================
+
+Suggestions mode must return a JSON array like:
+
+[
+  {
+    "suggestion_id": "s1",
+    "suggestion_cot": "...",
+    "steps": [
+      {
+        "step_id": "step_1",
+        "step_goal": "...",
+        "input_image": "root",
+        "capability_plan": [
+          {
+            "order": 1,
+            "capability": "ground_box",
+            "instruction": "..."
+          }
+        ],
+        "executor_instruction": "..."
+      }
+    ]
+  }
+]
+
+=====================================================
+FINAL REMINDER
+=====================================================
+
+You are choosing between answering now and proposing executable strategy branches.
+
+Return exactly ONE JSON object.

@@ -1,0 +1,461 @@
+﻿{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "trajectory_schema.json",
+  "title": "OfflineTrajectory",
+  "description": "Index record for one offline branching trajectory.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "sample_id",
+    "trajectory_id",
+    "parent_trajectory_id",
+    "status",
+    "created_at",
+    "updated_at",
+    "round_idx",
+    "step_idx",
+    "question",
+    "original_image_artifact_id",
+    "messages_path",
+    "planner_history",
+    "latest_planner_round_idx",
+    "latest_planner_output_path",
+    "fork_provenance",
+    "pending_execution",
+    "steps",
+    "judge_records",
+    "final_answer",
+    "answer_confidence",
+    "budget",
+    "last_error"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "0.1.0"
+    },
+    "sample_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "trajectory_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parent_trajectory_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "running",
+        "expanded",
+        "answered",
+        "pruned",
+        "failed",
+        "stopped_early",
+        "max_step_reached",
+        "error"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "round_idx": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "step_idx": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "question": {
+      "type": "string",
+      "minLength": 1
+    },
+    "answer_instruction": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "original_image_artifact_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "messages_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "planner_history": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/plannerHistoryItem"
+      }
+    },
+    "latest_planner_round_idx": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "latest_planner_output_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "fork_provenance": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/forkProvenance"
+        }
+      ]
+    },
+    "pending_execution": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/pendingExecution"
+        }
+      ]
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/stepRecord"
+      }
+    },
+    "judge_records": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/judgeRecordRef"
+      }
+    },
+    "final_answer": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "answer_confidence": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "budget": {
+      "$ref": "#/$defs/budget"
+    },
+    "last_error": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/errorInfo"
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "plannerHistoryItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "round_idx",
+        "planner_output_path",
+        "can_answer_now",
+        "selected_for_expansion",
+        "created_at"
+      ],
+      "properties": {
+        "round_idx": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "planner_output_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "can_answer_now": {
+          "type": "boolean"
+        },
+        "direct_answer": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selected_for_expansion": {
+          "type": "boolean"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "forkProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "parent_trajectory_id",
+        "parent_planner_round_idx",
+        "parent_suggestion_id"
+      ],
+      "properties": {
+        "parent_trajectory_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parent_planner_round_idx": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "parent_suggestion_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "pendingExecution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "planner_round_idx",
+        "suggestion_id",
+        "suggestion_step_index",
+        "step_id"
+      ],
+      "properties": {
+        "planner_round_idx": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "suggestion_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "suggestion_step_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "step_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "stepRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "execution_trajectory_id",
+        "step_idx",
+        "planner_round_idx",
+        "suggestion_id",
+        "suggestion_step_index",
+        "step_id",
+        "step_goal",
+        "input_image_index",
+        "input_artifact_id",
+        "capability_plan",
+        "executor_description",
+        "executor_cot_path",
+        "executor_code_path",
+        "runtime_result_path",
+        "assistant_message_id",
+        "tool_message_id",
+        "executor_metadata"
+      ],
+      "properties": {
+        "execution_trajectory_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "step_idx": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "planner_round_idx": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "suggestion_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "suggestion_step_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "step_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "step_goal": {
+          "type": "string",
+          "minLength": 1
+        },
+        "input_image_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "input_artifact_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "capability_plan": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/capabilityPlanItem"
+          }
+        },
+        "executor_description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "executor_cot_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "executor_code_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runtime_result_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "assistant_message_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "tool_message_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "executor_metadata": {
+          "type": "object"
+        }
+      }
+    },
+    "capabilityPlanItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "order",
+        "capability",
+        "instruction"
+      ],
+      "properties": {
+        "order": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "capability": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_]*$"
+        },
+        "instruction": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "judgeRecordRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "judge_stage",
+        "judge_record_path"
+      ],
+      "properties": {
+        "judge_stage": {
+          "type": "string",
+          "enum": [
+            "cheap_filter",
+            "committee",
+            "final_select"
+          ]
+        },
+        "judge_record_path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "remaining_exec_steps"
+      ],
+      "properties": {
+        "remaining_exec_steps": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "errorInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "round_idx": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "step_idx": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "traceback_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}

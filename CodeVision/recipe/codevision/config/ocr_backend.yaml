@@ -1,0 +1,4 @@
+gpu_memory_utilization: 0.7
+max_model_len: 1024
+max_num_batched_tokens: 2048
+api_server_count: 1

@@ -1,0 +1,11 @@
+include: tv_pass16_template.yaml
+task: tv_pass16_fsc147
+dataset_kwargs:
+  data_files:
+    test: /mnt/cpfs/delinmao/data/toolvision_pass16_lmms_rerun_all/inputs/fsc147_real.jsonl
+generation_kwargs:
+  max_new_tokens: 32
+  temperature: 1.0
+  top_p: 1.0
+  num_beams: 1
+  do_sample: true

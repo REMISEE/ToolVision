@@ -1,0 +1,143 @@
+# =============================================================================
+# code_image_tool_config_v03_sftclean.yaml  (created 2026-05-28)
+#
+# Variant of code_image_tool_config_v03 copy.yaml (the 10-tool concrete-value
+# schema that EXACTLY matches the SFT model `sft-mix200-simple-notool-sp3-v03`).
+#
+# Differences vs `v03 copy.yaml`:
+#   1. The `description` parameter's example phrases are abstracted.
+#      Old: "Count the cars with count assist", "Localize the car tire"
+#      New: "Count the queried objects", "Localize the asked-about object"
+#   2. Tool-call example objects diversified (2026-06-02). Previously all six
+#      tool-call examples used "car"/"car tire", causing the model to copy
+#      "car" phrasing into descriptions of unrelated questions and to bias
+#      every example toward one semantic anchor. New assignments (one
+#      concrete object per tool — still concrete, NOT placeholders):
+#        count_assist  : car      -> person
+#        dino_crop     : car tire -> traffic sign
+#        ground_box    : car tire -> license plate
+#        sam_mask      : car tire -> dog ear
+#        blur_bg       : car      -> bicycle
+#        ground_depth  : car      -> bottle
+#      Manual crop/depth/box keep their `label="target"` (no object name).
+#      JSON syntactic shape is unchanged from SFT — only the example token
+#      varies — so JSON quality should be preserved.
+#
+# Rationale:
+#   The concrete tool-call examples (_call_count_assist("car", ...),
+#   _call_dino_crop("car tire", ...)) are KEPT verbatim — the SFT model
+#   learned this exact pattern and can produce valid JSON from it. Changing
+#   them to placeholders broke JSON quality (see promptfix run regression).
+#
+#   But the description-parameter example phrases ("Count the cars...",
+#   "Localize the car tire") were causing the model to literally copy "car"
+#   phrases into descriptions of unrelated questions (cosmetic leak; doesn't
+#   affect tool execution but pollutes logs).
+#
+#   Abstracting ONLY the description-of-description text:
+#   - Tool-call substitution behavior is unchanged (model still substitutes
+#     "car" with the actual subject in the `code` field — that part wasn't
+#     broken).
+#   - Description-parameter copy leak is reduced (model no longer sees
+#     "Count cars" suggested at every inference).
+#   - JSON quality preserved (the tool-call examples shown to the model are
+#     identical to what SFT trained on).
+# =============================================================================
+tools:
+  - class_name: "verl.tools.code_image_tool.CodeImageTool"
+    config:
+      type: native
+      num_workers: 20
+      rate_limit: 50
+      timeout: 30
+      max_code_length: 2048
+      enable_global_rate_limit: true
+      enable_external_model_functions: true
+      external_call_mode: "service"
+      ocr_model_name: "paddleocr"
+      external_services:
+        paddleocr:
+          base_url: "http://127.0.0.1:8080"
+          request_timeout: 180
+          default_file_type: 1
+          use_doc_orientation_classify: false
+          use_doc_unwarping: false
+          use_textline_orientation: true
+          text_det_limit_side_len: 960
+          text_det_limit_type: "max"
+          text_det_thresh: 0.4
+          text_det_box_thresh: 0.7
+          text_rec_score_thresh: 0.6
+          return_word_box: false
+          visualize: true
+          line_y_threshold: 0.6
+        paddleocr_vl:
+          serving_base_url: "http://127.0.0.1:8080"
+          request_timeout: 180
+          default_file_type: 1
+          visualize: false
+          restructure_pages: false
+        grounded_sam2:
+          base_url: "http://127.0.0.1:8081"
+          request_timeout: 180
+        depth:
+          base_url: "http://127.0.0.1:8082"
+          request_timeout: 180
+        countgd:
+          base_url: "http://127.0.0.1:8083"
+          request_timeout: 180
+    tool_schema:
+      type: "function"
+      function:
+        name: "code_image_tool"
+        description: "A unified tool for targeted image inspection using executable Python code. It supports PIL/cv2/numpy image operations and external helper functions for OCR, object localization, segmentation-based highlighting, depth estimation, and counting. The 'draw' variable provides drawing capabilities."
+        parameters:
+          type: "object"
+          properties:
+            code:
+              type: "string"
+              description: |
+                Python code to inspect or process the image. Use 'image' or 'img' for input, and 'draw' for drawing. Do not read images from files or URLs; directly use the provided 'image' or 'img' variable. Return a PIL Image object by assigning it to 'result' or 'output'. All helpers return a dict with keys "image", "images", "text", and "meta"; use helper["image"] as the main returned image when you want to pass the helper observation back. Coordinates are (x_min, y_min, x_max, y_max) in image pixel space.
+
+                Choose the operation according to the evidence needed:
+                - OCR assist: ocr = _call_ocr_assist(); print(ocr["text"]); result = ocr["image"]
+                  Use this for text-heavy images, small text, dense text, charts with hard-to-read labels, forms, documents, or OCR-style questions.
+                - Count assist: count = _call_count_assist("person", confidence_thresh=0.23, visualize="heatmap"); print(count["meta"].get("count")); result = count["image"]
+                  Use this when the question asks how many instances of a described object are present.
+                - Manual crop: crop = _call_manual_crop(120, 80, 260, 180, padding=4); result = crop["image"]
+                  Use this when a known local region needs a closer view.
+                - Dino crop: crop = _call_dino_crop("traffic sign", max_crops=1, padding=8); result = crop["image"]
+                  Use this when an automatic object-focused crop from a short text description would help inspect the object.
+                - Ground box: box = _call_ground_box("license plate"); result = box["image"]
+                  Use this when you need to localize an object from a short text description.
+                - SAM mask: mask = _call_sam_mask("dog ear", multimask_output=True); result = mask["image"]
+                  Use this when a highlighted mask helps inspect the target region more clearly.
+                - Blur background: blur = _call_blur_bg("bicycle", blur_radius=8.0); result = blur["image"]
+                  Use this when suppressing background clutter helps isolate the foreground object.
+                - Manual depth: depth = _call_manual_depth(120, 80, 260, 180, stat="median", label="target"); result = depth["image"]
+                  Use this when you already know the region and need a depth estimate for it.
+                - Ground depth: depth = _call_ground_depth("bottle", detection_index=0, stat="median"); result = depth["image"]
+                  Use this when you need grounding first and then depth measurement for the grounded object.
+                - Manual box: box = _call_manual_box(120, 80, 260, 180, label="target"); result = box["image"]
+                  Use this when you already know exact coordinates and want to mark a region.
+
+                Basic image operations:
+                - Rotate: result = image.rotate(angle, expand=True)
+                - Flip: result = ImageOps.flip(image) or ImageOps.mirror(image)
+                - Brightness: result = ImageEnhance.Brightness(image).enhance(factor)
+                - Contrast: result = ImageEnhance.Contrast(image).enhance(factor)
+
+                You can combine PIL, NumPy, OpenCV, math libraries, and helper functions when useful. Select the simplest targeted operation that reveals the evidence needed for the specific question.
+            description:
+              type: "string"
+              # Abstracted from `v03 copy.yaml` — concrete car-themed examples removed
+              # to stop the model from copying "Count the cars" / "the car tire" phrases
+              # into descriptions of unrelated questions (cosmetic leak observed in
+              # rnec/legacy run logs). Tool-call examples in `code.description` above
+              # are intentionally left concrete to preserve SFT-aligned JSON pattern.
+              description: "Clear description of what the code does for the current image and question. For example, 'Run the chosen helper on the relevant region', 'Crop the region of interest for closer inspection', 'Count the queried objects using count assist', or 'Localize the asked-about object'."
+            image_index:
+              type: "integer"
+              minimum: 0
+              description: "Index of the visible image timeline to process (0-based). Root images come first, and each successful tool-returned image is appended for later steps."
+          required: ["code", "description", "image_index"]

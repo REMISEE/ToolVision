@@ -1,0 +1,91 @@
+tools:
+  - class_name: "verl.tools.code_image_tool.CodeImageTool"
+    config:
+      type: native
+      num_workers: 20
+      rate_limit: 50
+      timeout: 30
+      max_code_length: 2048
+      enable_global_rate_limit: true
+      enable_external_model_functions: true
+      external_call_mode: "service"
+      ocr_model_name: "paddleocr"
+      external_services:
+        paddleocr:
+          base_url: "http://127.0.0.1:8080"
+          request_timeout: 180
+          default_file_type: 1
+          use_doc_orientation_classify: false
+          use_doc_unwarping: false
+          use_textline_orientation: true
+          text_det_limit_side_len: 960
+          text_det_limit_type: "max"
+          text_det_thresh: 0.4
+          text_det_box_thresh: 0.7
+          text_rec_score_thresh: 0.6
+          return_word_box: false
+          visualize: true
+          line_y_threshold: 0.6
+        paddleocr_vl:
+          serving_base_url: "http://127.0.0.1:8080"
+          request_timeout: 180
+          default_file_type: 1
+          visualize: false
+          restructure_pages: false
+        grounded_sam2:
+          base_url: "http://127.0.0.1:8081"
+          request_timeout: 180
+        depth:
+          base_url: "http://127.0.0.1:8082"
+          request_timeout: 180
+        countgd:
+          base_url: "http://127.0.0.1:8083"
+          request_timeout: 180
+    tool_schema:
+      type: "function"
+      function:
+        name: "code_image_tool"
+        description: "A unified tool for image processing using executable Python code. Supports basic operations (resize, rotate, flip, brightness, contrast), general cv2/PIL/numpy processing, and external helper functions for OCR, grounding, segmentation-based highlighting, depth estimation, and counting. The 'draw' variable provides drawing capabilities."
+        parameters:
+          type: "object"
+          properties:
+            code:
+              type: "string"
+              description: |
+                Python code to process the image. Use 'image' or 'img' for input, 'draw' for drawing. Important: Do not read image from file or URL, directly use the 'image' or 'img' variable. Return PIL Image object and save the result to 'result' or 'output' variable. All helpers return a dict with keys "image", "images", "text", and "meta". Use helper["image"] as the main returned image. Coordinates are (x_min, y_min, x_max, y_max) in image pixel space. Available helper functions:
+                - OCR assist: ocr = _call_ocr_assist(); result = ocr["image"]
+                  Use this when text is small, dense, or hard to read directly.
+                - Manual box: box = _call_manual_box(120, 80, 260, 180, label="target"); result = box["image"]
+                  Use this when you already know the exact coordinates and want to mark a region.
+                - Manual crop: crop = _call_manual_crop(120, 80, 260, 180, padding=4); result = crop["image"]
+                  Use this when you already know the exact coordinates and want a closer local view.
+                - Ground box: box = _call_ground_box("car tire"); result = box["image"]
+                  Use this when you need to localize an object from a short text description.
+                - SAM mask: mask = _call_sam_mask("car tire", multimask_output=True); result = mask["image"]
+                  Use this when a highlighted mask helps inspect the target region more clearly.
+                - Dino crop: crop = _call_dino_crop("car tire", max_crops=1, padding=8); result = crop["image"]
+                  Use this when you want an automatic object-focused crop from a short text description.
+                - Blur background: blur = _call_blur_bg("car", blur_radius=8.0); result = blur["image"]
+                  Use this when suppressing background clutter helps isolate the foreground object.
+                - Manual depth: depth = _call_manual_depth(120, 80, 260, 180, stat="median", label="target"); result = depth["image"]
+                  Use this when you already know the region and need a depth estimate for it.
+                - Ground depth: depth = _call_ground_depth("car", detection_index=0, stat="median"); result = depth["image"]
+                  Use this when you need grounding first and then depth measurement for the grounded object.
+                - Count assist: count = _call_count_assist("car", confidence_thresh=0.23, visualize="heatmap"); result = count["image"]
+                  Use this when the task is counting objects described in text.
+                Basic operation examples:
+                - Manual crop: crop = _call_manual_crop(120, 80, 260, 180, padding=4); result = crop["image"]
+                - Dino crop: crop = _call_dino_crop("car tire", max_crops=1, padding=8); result = crop["image"]
+                - Rotate: result = image.rotate(angle, expand=True), expand=True must be set to True
+                - Flip: result = ImageOps.flip(image) or ImageOps.mirror(image)
+                - Brightness: result = ImageEnhance.Brightness(image).enhance(factor)
+                - Contrast: result = ImageEnhance.Contrast(image).enhance(factor)
+                You can also use other operations from PIL, NumPy, OpenCV, and math libraries, and combine them with the provided helper functions when useful. You should observe the image carefully and determine the best operation to perform. If the image has a wrong direction (usually happens), you should consider flipping or rotating the image to the correct direction before answering the question. Important Hint: Crop, rotate, flip, OCR, grounding, and counting are among the most common useful operations, and you should prioritize the simplest operation that can reveal the needed evidence.
+            description:
+              type: "string"
+              description: "Clear description of what the code does. For example, 'Draw a line from (10, 20) to (30, 40)', 'Flip the image horizontally'"
+            image_index:
+              type: "integer"
+              minimum: 0
+              description: "Index of the visible image timeline to process (0-based). Root images come first, and each successful tool-returned image is appended for later steps."
+          required: ["code", "description", "image_index"]

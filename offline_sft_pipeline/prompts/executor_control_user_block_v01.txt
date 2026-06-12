@@ -1,0 +1,31 @@
+The conversation above is the executed trajectory so far (user question, prior assistant actions, and tool outputs).
+
+Execution requirements for this step:
+- Return exactly one JSON object with `think` and `tool_call`.
+- Do not answer the question directly.
+- Produce a self-contained step-level rationale for this step.
+
+How to use the hidden context below:
+- `Current reasoning context` gives the high-level analysis of the question, the current image state, and the main uncertainty.
+- `Current action rationale` gives the local solution path and why this action is being followed.
+- `Current objective` gives the exact local objective that this step must accomplish now.
+- Fuse these layers into one coherent rationale for the current step.
+- Do not simply repeat the fields. Integrate them into a grounded explanation of what is currently visible or uncertain, why this branch is appropriate, why this specific step is the right next action, and why the chosen tool operation advances the solution.
+
+Hidden context for the current step:
+- Current reasoning context: $planner_global_chain_cot
+- Current action rationale: $suggestion_cot
+- Current objective: $step_goal
+$optional_executor_instruction_block
+
+Visible images for this step:
+$visible_images_for_step_block
+
+Image-use reminder:
+- The default `image` / `img` already refers to the starting image for this step.
+$default_image_line
+- If you continue processing an intermediate helper output within this step, prefer `image_obj=prev["image"]`.
+- Finish by assigning the final chosen image to `result`.
+
+Available tool helpers:
+$tool_helpers_block

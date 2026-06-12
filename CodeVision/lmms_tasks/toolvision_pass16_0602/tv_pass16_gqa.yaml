@@ -1,0 +1,32 @@
+dataset_path: json
+dataset_kwargs:
+  data_files:
+    test: /mnt/cpfs/delinmao/data/toolvision_pass16_lmms_rerun/inputs/gqa_real.jsonl
+task: tv_pass16_gqa
+test_split: test
+output_type: generate_until
+doc_to_visual: !function utils.tv_doc_to_visual
+doc_to_text: !function utils.tv_doc_to_text
+doc_to_target: !function utils.tv_doc_to_target
+process_results: !function utils.tv_process_results
+generation_kwargs:
+  max_new_tokens: 16
+  temperature: 1.0
+  top_p: 1.0
+  num_beams: 1
+  do_sample: true
+filter_list:
+  - name: "all"
+    filter:
+      - function: "take_all"
+metric_list:
+  - metric: tv_pass16_score
+    aggregation: !function utils.tv_aggregate_scores
+    higher_is_better: true
+metadata:
+  - version: 0.1
+  - source: gqa
+lmms_eval_specific_kwargs:
+  default:
+    pre_prompt: ""
+    post_prompt: ""

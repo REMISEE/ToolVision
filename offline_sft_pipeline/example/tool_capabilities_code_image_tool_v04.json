@@ -1,0 +1,97 @@
+[
+  {
+    "name": "ocr_assist",
+    "description": "Language description:\nRead text from the selected image and return both text and an OCR visualization.\n\nReal helper:\n_call_ocr_assist(image_index=None, image_obj=None, **kwargs)\n\nKey outputs:\n- ocr[\"text\"]: OCR text result\n- ocr[\"image\"]: OCR visualization image\n- ocr[\"images\"]: returned image list\n- ocr[\"meta\"]: structured OCR metadata\n\nShort example:\nocr = _call_ocr_assist()\nprint(ocr.get(\"text\", \"\"))\nresult = ocr[\"image\"]",
+    "usage_notes": "Use `_call_ocr_assist` for text-heavy images, small text, dense labels, forms, documents, and charts with hard-to-read labels. Treat OCR as an evidence observation to combine with the visible image context when spatial layout, color, ordering, or relations matter."
+  },
+  {
+    "name": "rotate_image",
+    "description": "Language description:\nRotate the current image to correct orientation or align the target for easier reading.\n\nDirect code capability:\nNo helper is required; use PIL rotation directly.\n\nShort example:\nresult = image.rotate(90, expand=True)",
+    "usage_notes": "Use this when the image, chart, document, or label is clearly misoriented. Keep expand=True so the rotated image is not clipped."
+  },
+  {
+    "name": "flip_image",
+    "description": "Language description:\nFlip the current image horizontally or vertically when the scene is mirrored or upside down.\n\nDirect code capability:\nNo helper is required; use PIL transpose operations directly.\n\nShort example:\nresult = image.transpose(Image.FLIP_LEFT_RIGHT)",
+    "usage_notes": "Use this when text, axes, or object layout indicates the image is mirrored or upside down."
+  },
+  {
+    "name": "resize_image",
+    "description": "Language description:\nResize the current image to enlarge a small target or normalize it before inspection.\n\nDirect code capability:\nNo helper is required; resize directly with PIL.\n\nShort example:\nwidth, height = image.size\nresult = image.resize((width * 2, height * 2))",
+    "usage_notes": "Use this when the whole image or crop is too small to inspect comfortably. Keep the resized output as the new working image."
+  },
+  {
+    "name": "adjust_brightness",
+    "description": "Language description:\nAdjust image brightness to reveal dark or washed-out details.\n\nDirect code capability:\nNo helper is required; use ImageEnhance.Brightness directly.\n\nShort example:\nresult = ImageEnhance.Brightness(image).enhance(1.4)",
+    "usage_notes": "Use moderate factors first. Prefer this when task-relevant text or boundaries are hard to see because the image is too dark or washed out."
+  },
+  {
+    "name": "adjust_contrast",
+    "description": "Language description:\nAdjust image contrast to make faint text, boundaries, or local structure easier to inspect.\n\nDirect code capability:\nNo helper is required; use ImageEnhance.Contrast directly.\n\nShort example:\nresult = ImageEnhance.Contrast(image).enhance(1.6)",
+    "usage_notes": "Use moderate factors such as 1.2 to 2.0. Use this when contrast is expected to reveal task-relevant evidence, not as a generic repeated cleanup step."
+  },
+  {
+    "name": "adjust_sharpness",
+    "description": "Language description:\nAdjust image sharpness to make fine text or edges more legible.\n\nDirect code capability:\nNo helper is required; use ImageEnhance.Sharpness directly.\n\nShort example:\nresult = ImageEnhance.Sharpness(image).enhance(1.6)",
+    "usage_notes": "Use this when the selected image or crop is slightly blurry or soft. Prefer moderate sharpening over aggressive artifacts."
+  },
+  {
+    "name": "draw_horizontal_line",
+    "description": "Language description:\nDraw a horizontal reference line at a specified image row to verify chart thresholds, gridline alignment, or whether points are above or below a value.\n\nDirect code capability:\nNo helper is required; use PIL ImageDraw directly. The height location must be a pixel y-coordinate in the current rendered image, not a chart-axis value. Work on a copy and assign it to `result`.\n\nShort example:\nvis = image.copy()\nw, h = vis.size\ny = 180\nImageDraw.Draw(vis).line([(0, y), (w, y)], fill=\"red\", width=3)\nresult = vis",
+    "usage_notes": "Use this when a row-level visual guide helps compare chart points against a threshold or gridline. Coordinates are pixel coordinates in the selected input image. Keep the line task-relevant and explain what threshold or alignment it is meant to verify."
+  },
+  {
+    "name": "draw_vertical_line",
+    "description": "Language description:\nDraw a vertical reference line at a specified image column to align chart points with x-axis ticks, categories, or time labels.\n\nDirect code capability:\nNo helper is required; use PIL ImageDraw directly. The width location must be a pixel x-coordinate in the current rendered image, not a chart-axis value. Work on a copy and assign it to `result`.\n\nShort example:\nvis = image.copy()\nw, h = vis.size\nx = 240\nImageDraw.Draw(vis).line([(x, 0), (x, h)], fill=\"red\", width=3)\nresult = vis",
+    "usage_notes": "Use this when a column-level visual guide helps bind a data point to an x-axis tick, category, or vertical gridline. Coordinates are pixel coordinates in the selected input image. Keep the line task-relevant and explain what tick or point it is meant to verify."
+  },
+  {
+    "name": "draw_point",
+    "description": "Language description:\nMark one or more explicit points on the image to identify chart data points, extrema, intersections, object centers, or count candidates.\n\nDirect code capability:\nNo helper is required; use PIL ImageDraw directly. Each point must be an [x, y] pixel coordinate in the current rendered image, not chart-axis units. Work on a copy and assign it to `result`.\n\nShort example:\nvis = image.copy()\nd = ImageDraw.Draw(vis)\nfor x, y in [(120, 180), (180, 150), (240, 130)]:\n    r = 5\n    d.ellipse((x-r, y-r, x+r, y+r), outline=\"red\", width=3)\nresult = vis",
+    "usage_notes": "Use this when sparse markers help preserve exact visual evidence, such as the highest point in a line chart, a threshold-crossing point, or objects being counted. Coordinates are pixel coordinates in the selected input image. Keep markers sparse and task-relevant."
+  },
+  {
+    "name": "manual_box",
+    "description": "Language description:\nDraw a box on an image using explicit pixel coordinates.\n\nReal helper:\n_call_manual_box(x1, y1, x2, y2, image_index=None, image_obj=None, outline=\"lime\", width=2, label=None, label_fill=None)\n\nKey outputs:\n- box[\"image\"]: boxed visualization image\n- box[\"meta\"]: box metadata\n\nShort example:\nbox = _call_manual_box(120, 80, 260, 180, label=\"target\")\nresult = box[\"image\"]",
+    "usage_notes": "Use `_call_manual_box` when exact coordinates are already known and marking the region helps verification. Coordinates are pixel coordinates on the selected input image."
+  },
+  {
+    "name": "manual_crop",
+    "description": "Language description:\nCrop a local region using explicit pixel coordinates.\n\nReal helper:\n_call_manual_crop(x1, y1, x2, y2, image_index=None, image_obj=None, padding=0)\n\nKey outputs:\n- crop[\"image\"]: cropped image\n- crop[\"meta\"][\"crop_box\"]: clipped crop coordinates\n\nShort example:\ncrop = _call_manual_crop(120, 80, 260, 180, padding=4)\nresult = crop[\"image\"]",
+    "usage_notes": "Use `_call_manual_crop` when a known local region needs a closer view. Coordinates are pixel coordinates on the selected input image."
+  },
+  {
+    "name": "ground_box",
+    "description": "Language description:\nGround a text-described target and return a boxed image.\n\nReal helper:\n_call_ground_box(text_prompt, image_index=None, image_obj=None, box_threshold=0.35, text_threshold=0.25, **kwargs)\n\nKey outputs:\n- box[\"image\"]: grounded box visualization image\n- box[\"text\"]: helper feedback\n- box[\"meta\"]: grounding metadata\n\nShort example:\nbox = _call_ground_box(\"price tag\")\nresult = box[\"image\"]",
+    "usage_notes": "Use `_call_ground_box` for short visual target phrases. Long prompts or relation-heavy descriptions can make grounding unstable."
+  },
+  {
+    "name": "sam_mask",
+    "description": "Language description:\nGround a text-described target and return a highlighted SAM2 mask image.\n\nReal helper:\n_call_sam_mask(text_prompt, image_index=None, image_obj=None, box_threshold=0.35, text_threshold=0.25, multimask_output=False, mask_alpha=0.45, draw_box_on_mask=True, **kwargs)\n\nKey outputs:\n- mask[\"image\"]: mask visualization image\n- mask[\"text\"]: helper feedback\n- mask[\"meta\"]: mask metadata\n\nShort example:\nmask = _call_sam_mask(\"hanging tag\", multimask_output=False)\nresult = mask[\"image\"]",
+    "usage_notes": "Use `_call_sam_mask` when a highlighted mask helps inspect a target region. Short target phrases work best."
+  },
+  {
+    "name": "dino_crop",
+    "description": "Language description:\nGround a text-described target and return one or more cropped regions.\n\nReal helper:\n_call_dino_crop(text_prompt, image_index=None, image_obj=None, based_on=\"box\", detection_index=0, max_crops=1, padding=0, box_threshold=0.35, text_threshold=0.25, multimask_output=False, **kwargs)\n\nKey outputs:\n- crop[\"image\"]: primary crop image\n- crop[\"images\"]: all returned crop images\n- crop[\"text\"]: helper feedback\n- crop[\"meta\"]: crop metadata\n\nShort example:\ncrop = _call_dino_crop(\"serial number\", max_crops=1, padding=4)\nresult = crop[\"image\"]",
+    "usage_notes": "Use `_call_dino_crop` when automatic object-focused cropping from a short text description is likely to isolate relevant evidence. If multiple crops are returned, the final result must still be a single image."
+  },
+  {
+    "name": "blur_bg",
+    "description": "Language description:\nKeep a grounded target clearer while blurring the background.\n\nReal helper:\n_call_blur_bg(text_prompt, image_index=None, image_obj=None, blur_radius=8.0, box_threshold=0.35, text_threshold=0.25, multimask_output=False, **kwargs)\n\nKey outputs:\n- focus[\"image\"]: background-blurred image\n- focus[\"text\"]: helper feedback\n- focus[\"meta\"]: blur metadata\n\nShort example:\nfocus = _call_blur_bg(\"label\")\nresult = focus[\"image\"]",
+    "usage_notes": "Use `_call_blur_bg` when suppressing background clutter is expected to help inspect the foreground target."
+  },
+  {
+    "name": "manual_depth",
+    "description": "Language description:\nMeasure the depth of an explicit pixel region on the full image.\n\nReal helper:\n_call_manual_depth(x1, y1, x2, y2, image_index=None, image_obj=None, stat=\"median\", vis_mode=\"overlay\", padding=0, label=None, **kwargs)\n\nKey outputs:\n- depth[\"image\"]: full-image visualization with region and depth label\n- depth[\"text\"]: depth conclusion\n- depth[\"meta\"]: structured depth statistics\n\nShort example:\ndepth = _call_manual_depth(120, 80, 260, 180, stat=\"median\", label=\"target\")\nprint(depth[\"text\"])\nresult = depth[\"image\"]",
+    "usage_notes": "Use `_call_manual_depth` when coordinates are known and a stable region-depth estimate is needed."
+  },
+  {
+    "name": "ground_depth",
+    "description": "Language description:\nGround a text-described target, pick one detection, then measure that detection region's depth on the full image.\n\nReal helper:\n_call_ground_depth(text_prompt, image_index=None, image_obj=None, detection_index=0, box_threshold=0.35, text_threshold=0.25, stat=\"median\", vis_mode=\"overlay\", padding=0, label=None, **kwargs)\n\nKey outputs:\n- depth[\"image\"]: full-image visualization with selected detection and depth label\n- depth[\"text\"]: grounding plus depth conclusion\n- depth[\"meta\"]: selected detection and depth statistics\n\nShort example:\ndepth = _call_ground_depth(\"person\", detection_index=0, stat=\"median\")\nprint(depth[\"text\"])\nresult = depth[\"image\"]",
+    "usage_notes": "Use `_call_ground_depth` when target location is unknown and a single grounded detection plus depth measurement is needed."
+  },
+  {
+    "name": "count_assist",
+    "description": "Language description:\nCount text-described instances in the selected image and return a count visualization.\n\nReal helper:\n_call_count_assist(text_prompt, image_index=None, image_obj=None, confidence_thresh=0.23, visualize=\"heatmap\", **kwargs)\n\nKey outputs:\n- count[\"image\"]: count visualization image\n- count[\"text\"]: helper feedback\n- count[\"meta\"][\"count\"]: predicted count when available\n- count[\"meta\"]: structured count metadata\n\nShort example:\ncount = _call_count_assist(\"car\", confidence_thresh=0.23, visualize=\"heatmap\")\nprint(count[\"meta\"].get(\"count\"))\nresult = count[\"image\"]",
+    "usage_notes": "Use `_call_count_assist` when the task is to estimate how many instances of a described visual category appear in the image."
+  }
+]

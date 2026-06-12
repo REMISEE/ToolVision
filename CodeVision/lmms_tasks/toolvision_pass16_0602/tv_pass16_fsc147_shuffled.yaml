@@ -1,0 +1,5 @@
+include: tv_pass16_fsc147.yaml
+task: tv_pass16_fsc147_shuffled
+dataset_kwargs:
+  data_files:
+    test: /mnt/cpfs/delinmao/data/toolvision_pass16_lmms_rerun/inputs/fsc147_shuffled.jsonl

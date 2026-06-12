@@ -1,0 +1,5 @@
+include: tv_pass16_gqa.yaml
+task: tv_pass16_gqa_blank
+dataset_kwargs:
+  data_files:
+    test: /mnt/cpfs/delinmao/data/toolvision_pass16_lmms_rerun/inputs/gqa_blank.jsonl

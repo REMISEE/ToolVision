@@ -1,0 +1,45 @@
+services:
+  paddleocr-vl-api:
+    image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-vl:${API_IMAGE_TAG_SUFFIX}
+    container_name: paddleocr-vl-api
+    ports:
+      - 8080:8080
+    depends_on:
+      paddleocr-vlm-server:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    # TODO: Allow using a regular user
+    user: root
+    restart: unless-stopped
+    environment:
+      - VLM_BACKEND=${VLM_BACKEND:-vllm}
+    command: /bin/bash -c "paddlex --serve --pipeline /home/paddleocr/pipeline_config_${VLM_BACKEND}.yaml"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+
+  paddleocr-vlm-server:
+    image: ccr-2vdh3abv-pub.cnc.bj.baidubce.com/paddlepaddle/paddleocr-genai-${VLM_BACKEND}-server:${VLM_IMAGE_TAG_SUFFIX}
+    container_name: paddleocr-vlm-server
+    volumes:
+      - ../CodeVision/recipe/codevision/config/ocr_backend.yaml:/home/paddleocr/vlm_server_config.yaml:ro
+      - ../model_store/PaddleOCR-VL-1.5:/models/PaddleOCR-VL-1.5:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["0"]
+              capabilities: [gpu]
+    # TODO: Allow using a regular user
+    user: root
+    restart: unless-stopped
+    command: paddleocr genai_server --model_name PaddleOCR-VL-1.5-0.9B --model_dir /models/PaddleOCR-VL-1.5 --host 0.0.0.0 --port 8080 --backend vllm --backend_config /home/paddleocr/vlm_server_config.yaml
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      start_period: 300s

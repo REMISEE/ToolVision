@@ -1,0 +1,48 @@
+Traceback (most recent call last):
+  File "/mnt/cpfs/delinmao/ToolVision/offline_sft_pipeline/scripts/run_dataset_pipeline.py", line 878, in <module>
+    main()
+  File "/mnt/cpfs/delinmao/ToolVision/offline_sft_pipeline/scripts/run_dataset_pipeline.py", line 552, in main
+    raise FileNotFoundError(f"input JSONL not found: {input_jsonl}")
+FileNotFoundError: input JSONL not found: /mnt/cpfs/delinmao/data/mixed_chartqa_codevision_sft/smoke_8shards_2chartqa_2cv_keep_bad_20260516
+Traceback (most recent call last):
+  File "/mnt/cpfs/delinmao/ToolVision/offline_sft_pipeline/scripts/run_dataset_pipeline.py", line 878, in <module>
+    main()
+  File "/mnt/cpfs/delinmao/ToolVision/offline_sft_pipeline/scripts/run_dataset_pipeline.py", line 552, in main
+    raise FileNotFoundError(f"input JSONL not found: {input_jsonl}")
+FileNotFoundError: input JSONL not found: /mnt/cpfs/delinmao/data/mixed_chartqa_codevision_sft/smoke_8shards_2chartqa_2cv_keep_bad_20260516
+Traceback (most recent call last):
+  File "/mnt/cpfs/delinmao/ToolVision/offline_sft_pipeline/scripts/run_dataset_pipeline.py", line 878, in <module>
+    main()
+  File "/mnt/cpfs/delinmao/ToolVision/offline_sft_pipeline/scripts/run_dataset_pipeline.py", line 552, in main
+    raise FileNotFoundError(f"input JSONL not found: {input_jsonl}")
+FileNotFoundError: input JSONL not found: /mnt/cpfs/delinmao/data/mixed_chartqa_codevision_sft/smoke_8shards_2chartqa_2cv_keep_bad_20260516
+Traceback (most recent call last):
+  File "/mnt/cpfs/delinmao/ToolVision/offline_sft_pipeline/scripts/run_dataset_pipeline.py", line 878, in <module>
+    main()
+  File "/mnt/cpfs/delinmao/ToolVision/offline_sft_pipeline/scripts/run_dataset_pipeline.py", line 552, in main
+    raise FileNotFoundError(f"input JSONL not found: {input_jsonl}")
+FileNotFoundError: input JSONL not found: /mnt/cpfs/delinmao/data/mixed_chartqa_codevision_sft/smoke_8shards_2chartqa_2cv_keep_bad_20260516
+Traceback (most recent call last):
+  File "/mnt/cpfs/delinmao/ToolVision/offline_sft_pipeline/scripts/run_dataset_pipeline.py", line 878, in <module>
+    main()
+  File "/mnt/cpfs/delinmao/ToolVision/offline_sft_pipeline/scripts/run_dataset_pipeline.py", line 552, in main
+    raise FileNotFoundError(f"input JSONL not found: {input_jsonl}")
+FileNotFoundError: input JSONL not found: /mnt/cpfs/delinmao/data/mixed_chartqa_codevision_sft/smoke_8shards_2chartqa_2cv_keep_bad_20260516
+Traceback (most recent call last):
+  File "/mnt/cpfs/delinmao/ToolVision/offline_sft_pipeline/scripts/run_dataset_pipeline.py", line 878, in <module>
+    main()
+  File "/mnt/cpfs/delinmao/ToolVision/offline_sft_pipeline/scripts/run_dataset_pipeline.py", line 552, in main
+    raise FileNotFoundError(f"input JSONL not found: {input_jsonl}")
+FileNotFoundError: input JSONL not found: /mnt/cpfs/delinmao/data/mixed_chartqa_codevision_sft/smoke_8shards_2chartqa_2cv_keep_bad_20260516
+Traceback (most recent call last):
+  File "/mnt/cpfs/delinmao/ToolVision/offline_sft_pipeline/scripts/run_dataset_pipeline.py", line 878, in <module>
+    main()
+  File "/mnt/cpfs/delinmao/ToolVision/offline_sft_pipeline/scripts/run_dataset_pipeline.py", line 552, in main
+    raise FileNotFoundError(f"input JSONL not found: {input_jsonl}")
+FileNotFoundError: input JSONL not found: /mnt/cpfs/delinmao/data/mixed_chartqa_codevision_sft/smoke_8shards_2chartqa_2cv_keep_bad_20260516
+Traceback (most recent call last):
+  File "/mnt/cpfs/delinmao/ToolVision/offline_sft_pipeline/scripts/run_dataset_pipeline.py", line 878, in <module>
+    main()
+  File "/mnt/cpfs/delinmao/ToolVision/offline_sft_pipeline/scripts/run_dataset_pipeline.py", line 552, in main
+    raise FileNotFoundError(f"input JSONL not found: {input_jsonl}")
+FileNotFoundError: input JSONL not found: /mnt/cpfs/delinmao/data/mixed_chartqa_codevision_sft/smoke_8shards_2chartqa_2cv_keep_bad_20260516

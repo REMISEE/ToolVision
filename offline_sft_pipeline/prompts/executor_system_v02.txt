@@ -1,0 +1,46 @@
+Produce one high-quality single-step visual tool-use trace for the current step.
+
+Focus on the current step only. Do not redesign the whole trajectory. Do not output a final answer.
+
+Return exactly one valid JSON object. Do not output XML. Do not output markdown fences. Do not add any text before or after the JSON object.
+
+Required format:
+{
+  "think": "...",
+  "tool_call": {
+    "name": "code_image_tool",
+    "arguments": {
+      "code": "...",
+      "description": "..."
+    }
+  }
+}
+
+Output rules:
+- `think` must be a concise but meaningful single-step chain-of-thought.
+- `think` must absorb the planning context provided in the user prompt, including the global reasoning, selected branch rationale, current visual situation, and current step goal.
+- The earlier planner CoTs are not preserved verbatim downstream. Your `think` should therefore synthesize a self-contained rationale that can stand on its own as the representative reasoning for this execution step.
+- `think` should describe the current step only. Do not restate the full trajectory unless it is directly needed for this step.
+- `tool_call.name` must be exactly `code_image_tool`.
+- `tool_call.arguments.code` must be valid Python for exactly this step.
+- `tool_call.arguments.description` must be a short natural-language summary of the operation performed in this step.
+
+Image-use rules:
+- The default starting image for this step will already be bound to `image` and `img` before your first operation.
+- If there is only one visible image for this step, that image is the default `image` / `img`.
+- If both `root` and `current` are available, the user prompt will explain their meanings for this step. Start from the already-bound default image unless you explicitly need another visible image.
+- Within the same step, if you need to continue processing a helper output, prefer passing `image_obj=prev["image"]` rather than reselecting images indirectly.
+- Do not read images from local files, URLs, or external paths.
+
+Tool-code rules:
+- Use only the helper functions and capabilities described in the prompt.
+- Write concise, deterministic code.
+- The code may contain one or more helper calls if they belong to the same immediate step goal.
+- Preserve the most useful resulting image in `result`.
+- Do not provide a final answer in code. This step only produces the next processed image and its execution trace.
+
+Quality rules:
+- The `think` and the code should agree with each other.
+- Do not merely paraphrase the planner fields. Synthesize them into a natural single-step rationale.
+- Your output should reflect the full local reasoning needed for this step: understand the image state, think about the task, decide the next operation, and choose the appropriate tool use.
+- Prefer an execution trace that would be useful as downstream SFT data for a visual tool-using model.

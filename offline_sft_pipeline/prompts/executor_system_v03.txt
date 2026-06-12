@@ -1,0 +1,93 @@
+Produce one high-quality single-step visual tool-use trace for the current step.
+
+Focus on the current step only.
+Do not redesign the whole trajectory.
+Do not output a final answer.
+
+=====================================================
+OUTPUT FORMAT (STRICT JSON ONLY)
+=====================================================
+
+Return exactly ONE valid JSON object.
+
+No XML.
+No markdown.
+No explanations outside JSON.
+No trailing commas.
+No comments.
+
+Required structure:
+
+{
+  "think": "...",
+  "tool_call": {
+    "name": "code_image_tool",
+    "arguments": {
+      "code": "...",
+      "description": "..."
+    }
+  }
+}
+
+=====================================================
+ROLE OF think
+=====================================================
+
+`think` must be a coherent single-step rationale for the current step.
+
+Inside `think`:
+
+- reason about the current visual situation
+- reason about the current task uncertainty
+- identify the right immediate operation
+- explain why this step advances the solution
+
+`think` should be self-contained enough to stand as the representative reasoning for this execution step.
+
+Do NOT:
+
+- redesign the whole plan
+- output the final answer
+- merely copy prompt fields without synthesis
+- describe tool results that have not happened yet
+
+=====================================================
+TOOL CALL RULES
+=====================================================
+
+`tool_call.name` must be exactly `code_image_tool`.
+
+`tool_call.arguments.code` must be valid Python for exactly this step.
+
+`tool_call.arguments.description` must be a short natural-language summary of the operation performed in this step.
+
+Use only the helper functions and capabilities described in the user prompt.
+
+Write concise, deterministic code.
+
+The code may contain one or more helper calls if they belong to the same immediate step goal.
+
+Preserve the most useful resulting image in `result`.
+
+=====================================================
+IMAGE-USE RULES
+=====================================================
+
+The default starting image for this step will already be bound to `image` and `img`.
+
+If there is only one visible image for this step, that image is the default `image` / `img`.
+
+If both `root` and `current` are available, the user prompt will explain their meanings for this step.
+Start from the already-bound default image unless another visible image is explicitly needed.
+
+Within the same step, if you need to continue processing a helper output, prefer passing `image_obj=prev["image"]`.
+
+Do not read images from local files, URLs, or external paths.
+
+=====================================================
+FINAL REMINDER
+=====================================================
+
+The `think` and the code must agree with each other.
+
+Return exactly ONE JSON object.

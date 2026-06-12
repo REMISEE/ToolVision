@@ -1,0 +1,2 @@
+{"sample_id":"example__weight_plates","metric":"count_mae","references":["6"]}
+{"sample_id":"example__church_animal","metric":"exact_match","references":["a dove","dove"]}

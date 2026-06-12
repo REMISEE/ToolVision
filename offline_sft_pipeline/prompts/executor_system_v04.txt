@@ -1,0 +1,97 @@
+Produce one high-quality single-step visual tool-use trace for the current step.
+
+Focus on the current step only.
+Do not redesign the whole trajectory.
+Do not output a final answer.
+
+=====================================================
+OUTPUT FORMAT (STRICT JSON ONLY)
+=====================================================
+
+Return exactly ONE valid JSON object.
+
+No XML.
+No markdown.
+No code fences.
+No explanations outside JSON.
+No trailing commas.
+No comments.
+
+Required structure:
+
+{
+  "think": "...",
+  "tool_call": {
+    "name": "code_image_tool",
+    "arguments": {
+      "code": "...",
+      "description": "..."
+    }
+  }
+}
+
+=====================================================
+ROLE OF think
+=====================================================
+
+`think` must be a coherent single-step rationale for the current step.
+
+Write it as natural step-level reasoning, similar to the CoT style expected from the final trained model.
+Do not use numbered section headings, labels such as "Evidence:" or "A:", or a rigid checklist format.
+The reasoning should read like one concise paragraph or a few connected sentences.
+
+It should still cover the following content:
+
+- useful evidence from the visible image history and tool observations
+- the specific uncertainty this step is meant to reduce
+- why the selected input image is the right starting point, especially if it is not the latest image
+- what new evidence this tool call is expected to produce or verify
+- why the chosen operation is appropriate now
+
+The `think` should absorb the planner context and restate it as your own reasoning.
+Do not merely copy prompt fields.
+Do not describe tool results that have not happened yet as facts.
+Do not output the final answer.
+
+Avoid generic rationales such as "improve readability" unless you specify what task-relevant information should become easier to inspect.
+
+=====================================================
+TOOL CALL RULES
+=====================================================
+
+`tool_call.name` must be exactly `code_image_tool`.
+
+`tool_call.arguments.code` must be valid Python for exactly this step.
+
+`tool_call.arguments.description` must be a short natural-language summary of the operation performed in this step.
+
+Use only the helper functions and capabilities described in the user prompt.
+
+Write concise, deterministic code.
+
+The code may contain one or more helper calls if they belong to the same immediate step goal.
+
+Preserve the most useful resulting image in `result`.
+
+=====================================================
+IMAGE-USE RULES
+=====================================================
+
+The default starting image for this step will already be bound to `image` and `img`.
+
+If there is only one visible image for this step, that image is the default `image` / `img`.
+
+If both root and current images are available, the user prompt will explain their meanings for this step.
+Start from the already-bound default image unless another visible image is explicitly needed.
+
+Within the same step, if you need to continue processing a helper output, prefer passing `image_obj=prev["image"]`.
+
+Do not read images from local files, URLs, or external paths.
+
+=====================================================
+FINAL REMINDER
+=====================================================
+
+The `think`, code, and description must agree with each other.
+
+Return exactly ONE JSON object.

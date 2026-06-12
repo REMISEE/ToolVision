@@ -1,0 +1,15 @@
+Current judge context:
+
+Question:
+$question
+
+$answer_instruction_block
+
+Conversation history:
+$messages_json
+
+Visible images:
+$visible_images_json
+
+Solve the question from the evidence above.
+Return only the final answer text.

@@ -1,0 +1,82 @@
+[
+  {
+    "name": "ocr_assist",
+    "description": "Language description:\nRead text from the current image.\n\nReal helper:\n_call_ocr_assist(...)\n\nKey outputs:\n- `ocr[\"text\"]`: OCR text result\n- `ocr[\"image\"]`: OCR visualization image\n- `ocr[\"meta\"]`: structured OCR metadata\n\nShort example:\nocr = _call_ocr_assist()\nprint(ocr.get(\"text\", \"\"))\nresult = ocr[\"image\"]",
+    "usage_notes": "Use the real helper name `_call_ocr_assist`. OCR often provides both useful text and a useful visualization image."
+  },
+  {
+    "name": "rotate_image",
+    "description": "Language description:\nRotate the current image to correct orientation or align the target for easier reading.\n\nDirect code capability:\nNo helper is required; write the rotation directly with PIL.\n\nKey patterns:\n- 90 degrees clockwise: `result = image.rotate(270, expand=True)`\n- 90 degrees counter-clockwise: `result = image.rotate(90, expand=True)`\n- 180 degrees: `result = image.rotate(180, expand=True)`\n\nShort example:\nresult = image.rotate(270, expand=True)",
+    "usage_notes": "Use this when the image, chart, document, or label is clearly misoriented. Keep `expand=True` so the rotated image is not clipped."
+  },
+  {
+    "name": "flip_image",
+    "description": "Language description:\nFlip the current image horizontally or vertically when the scene is mirrored or upside down.\n\nDirect code capability:\nNo helper is required; use PIL transpose operations directly.\n\nKey patterns:\n- Horizontal flip: `result = image.transpose(Image.FLIP_LEFT_RIGHT)`\n- Vertical flip: `result = image.transpose(Image.FLIP_TOP_BOTTOM)`\n\nShort example:\nresult = image.transpose(Image.FLIP_TOP_BOTTOM)",
+    "usage_notes": "Use this when text, axes, or object layout indicates the image is mirrored or upside down."
+  },
+  {
+    "name": "resize_image",
+    "description": "Language description:\nResize the current image to enlarge a small target or normalize it before the next inspection step.\n\nDirect code capability:\nNo helper is required; resize directly with PIL.\n\nKey patterns:\n- Explicit size: `result = image.resize((new_w, new_h))`\n- Keep aspect ratio manually when needed by computing the new size first\n\nShort example:\nwidth, height = image.size\nresult = image.resize((width * 2, height * 2))",
+    "usage_notes": "Use this when the whole image or crop is too small to inspect comfortably. Keep the resized output as the new working image."
+  },
+  {
+    "name": "adjust_brightness",
+    "description": "Language description:\nAdjust image brightness to reveal dark or washed-out details before the next inspection step.\n\nDirect code capability:\nNo helper is required; use `ImageEnhance.Brightness` directly.\n\nKey patterns:\n- Brighten: `result = ImageEnhance.Brightness(image).enhance(1.4)`\n- Darken slightly: `result = ImageEnhance.Brightness(image).enhance(0.8)`\n\nShort example:\nresult = ImageEnhance.Brightness(image).enhance(1.4)",
+    "usage_notes": "Use moderate factors first. This is useful when text or object boundaries are hard to see because the image is too dark or too flat."
+  },
+  {
+    "name": "adjust_contrast",
+    "description": "Language description:\nAdjust image contrast to make faint text, boundaries, or local structure easier to inspect.\n\nDirect code capability:\nNo helper is required; use `ImageEnhance.Contrast` directly.\n\nKey patterns:\n- Increase contrast: `result = ImageEnhance.Contrast(image).enhance(1.8)`\n- Reduce contrast slightly: `result = ImageEnhance.Contrast(image).enhance(0.9)`\n\nShort example:\nresult = ImageEnhance.Contrast(image).enhance(1.8)",
+    "usage_notes": "This is one of the most common cleanup operations before OCR or close visual inspection. Prefer moderate factors such as 1.2 to 2.0."
+  },
+  {
+    "name": "adjust_sharpness",
+    "description": "Language description:\nAdjust image sharpness to make fine text or edges more legible before the next inspection step.\n\nDirect code capability:\nNo helper is required; use `ImageEnhance.Sharpness` directly.\n\nKey patterns:\n- Sharpen: `result = ImageEnhance.Sharpness(image).enhance(1.8)`\n- Reduce oversharpening: `result = ImageEnhance.Sharpness(image).enhance(1.2)`\n\nShort example:\nresult = ImageEnhance.Sharpness(image).enhance(1.8)",
+    "usage_notes": "Use this when the crop is slightly blurry or soft. Prefer moderate sharpening over aggressive artifacts."
+  },
+  {
+    "name": "manual_box",
+    "description": "Language description:\nDraw a box on an image using explicit pixel coordinates.\n\nReal helper:\n_call_manual_box(x1, y1, x2, y2, ...)\n\nKey outputs:\n- `box[\"image\"]`: boxed visualization image\n- `box[\"meta\"]`: box-related metadata\n\nShort example:\nbox = _call_manual_box(120, 80, 260, 180, label=\"target\")\nresult = box[\"image\"]",
+    "usage_notes": "Use `_call_manual_box` exactly by name. Coordinates are pixel coordinates on the current selected input image, so check that image's width and height before choosing the box."
+  },
+  {
+    "name": "manual_crop",
+    "description": "Language description:\nCrop a local region using explicit pixel coordinates.\n\nReal helper:\n_call_manual_crop(x1, y1, x2, y2, padding=0, ...)\n\nKey outputs:\n- `crop[\"image\"]`: cropped image\n- `crop[\"meta\"]`: crop metadata\n\nShort example:\ncrop = _call_manual_crop(120, 80, 260, 180, padding=4)\nresult = crop[\"image\"]",
+    "usage_notes": "Use `_call_manual_crop` exactly by name; do not shorten it to `manual_crop`. Coordinates are pixel coordinates on the current selected input image, so check that image's width and height before choosing the crop."
+  },
+  {
+    "name": "ground_box",
+    "description": "Language description:\nGround a text-described target and return a boxed image.\n\nReal helper:\n_call_ground_box(text_prompt, ...)\n\nKey outputs:\n- `box[\"image\"]`: grounded box visualization image\n- `box[\"text\"]`: helper text feedback\n- `box[\"meta\"]`: grounding metadata\n\nShort example:\nbox = _call_ground_box(\"price tag\")\nresult = box[\"image\"]",
+    "usage_notes": "Use `_call_ground_box` exactly by name. `text_prompt` works best as a short visual target phrase such as an object name or short noun phrase. Long prompts or relational descriptions can make grounding unstable."
+  },
+  {
+    "name": "sam_mask",
+    "description": "Language description:\nGround a text-described target and return a highlighted mask image.\n\nReal helper:\n_call_sam_mask(text_prompt, ...)\n\nKey outputs:\n- `mask[\"image\"]`: mask visualization image\n- `mask[\"text\"]`: helper text feedback\n- `mask[\"meta\"]`: mask metadata\n\nShort example:\nmask = _call_sam_mask(\"hanging tag\", multimask_output=False)\nresult = mask[\"image\"]",
+    "usage_notes": "Use `_call_sam_mask` exactly by name. `text_prompt` works best as a short visual target phrase. Long prompts or relation-heavy descriptions can make the selected mask unstable."
+  },
+  {
+    "name": "dino_crop",
+    "description": "Language description:\nGround a text-described target and return one or more cropped regions.\n\nReal helper:\n_call_dino_crop(text_prompt, max_crops=1, padding=0, ...)\n\nKey outputs:\n- `crop[\"image\"]`: primary crop image\n- `crop[\"images\"]`: all returned crop images\n- `crop[\"text\"]`: helper text feedback\n- `crop[\"meta\"]`: crop metadata\n\nShort example:\nbox = _call_ground_box(\"serial number\")\ncrop = _call_dino_crop(\"serial number\", max_crops=1, padding=4)\nresult = crop[\"image\"]",
+    "usage_notes": "Use `_call_dino_crop` exactly by name. `text_prompt` works best as a short visual target phrase. Long prompts or relational descriptions can crop the wrong region. If multiple crops are returned, the final `result` must still be a single image."
+  },
+  {
+    "name": "blur_bg",
+    "description": "Language description:\nKeep a grounded target clearer while blurring the background.\n\nReal helper:\n_call_blur_bg(text_prompt, ...)\n\nKey outputs:\n- `focus[\"image\"]`: background-blurred image\n- `focus[\"text\"]`: helper text feedback\n- `focus[\"meta\"]`: blur-related metadata\n\nShort example:\nfocus = _call_blur_bg(\"label\")\nresult = focus[\"image\"]",
+    "usage_notes": "Use `_call_blur_bg` exactly by name. Mainly useful when clutter hurts inspection."
+  },
+  {
+    "name": "manual_depth",
+    "description": "Language description:\nMeasure the depth of an explicit pixel region on the full image.\n\nReal helper:\n_call_manual_depth(x1, y1, x2, y2, stat=\"median\", vis_mode=\"overlay\", padding=0, label=None, ...)\n\nKey outputs:\n- `depth[\"image\"]`: full-image visualization with the region box and depth label\n- `depth[\"text\"]`: depth conclusion for that region\n- `depth[\"meta\"]`: structured region depth statistics\n\nShort example:\ndepth = _call_manual_depth(120, 80, 260, 180, stat=\"median\", label=\"target\")\nprint(depth[\"text\"])\nresult = depth[\"image\"]",
+    "usage_notes": "Use `_call_manual_depth` exactly by name. Coordinates are pixel coordinates on the current selected input image, so check that image's width and height before choosing the region. Prefer this when coordinates are already known and you want a stable region-depth estimate."
+  },
+  {
+    "name": "ground_depth",
+    "description": "Language description:\nGround a text-described target, pick one detection, then measure that detection region's depth on the full image.\n\nReal helper:\n_call_ground_depth(text_prompt, detection_index=0, box_threshold=0.35, text_threshold=0.25, stat=\"median\", vis_mode=\"overlay\", padding=0, label=None, ...)\n\nKey outputs:\n- `depth[\"image\"]`: full-image visualization with the selected detection and depth label\n- `depth[\"text\"]`: grounding plus depth conclusion\n- `depth[\"meta\"]`: selected detection info and region depth statistics\n\nShort example:\ndepth = _call_ground_depth(\"person\", detection_index=0, stat=\"median\")\nprint(depth[\"text\"])\nresult = depth[\"image\"]",
+    "usage_notes": "Use `_call_ground_depth` exactly by name. `text_prompt` works best as a short visual target phrase. Long prompts or relational descriptions can make the chosen detection unstable. Prefer this when the target location is unknown but you want a single grounded detection plus its depth."
+  },
+  {
+    "name": "count_assist",
+    "description": "Language description:\nCount text-described instances in the current image and return a count visualization.\n\nReal helper:\n_call_count_assist(text_prompt, confidence_thresh=0.23, visualize=\"heatmap\", ...)\n\nKey outputs:\n- `count[\"image\"]`: count visualization image\n- `count[\"text\"]`: helper text feedback\n- `count[\"meta\"][\"count\"]`: predicted count\n- `count[\"meta\"]`: structured count metadata such as boxes and scores\n\nShort example:\ncount = _call_count_assist(\"car\")\nprint(count[\"meta\"].get(\"count\"))\nresult = count[\"image\"]",
+    "usage_notes": "Use `_call_count_assist` exactly by name. Prefer this when the task is to estimate how many instances of a category appear in the image."
+  }
+]
