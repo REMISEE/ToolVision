@@ -3,7 +3,9 @@ set -euo pipefail
 
 ROOT_DIR="${ROOT_DIR:-/mnt/cpfs/delinmao/ToolVision/CodeVision}"
 TRAIN_SCRIPT="${TRAIN_SCRIPT:-recipe/codevision/qwen3_vl_gspo.sh}"
-CODEVISION_ENV="${CODEVISION_ENV:-/mnt/cpfs/delinmao/envs/codevision}"
+# Do not fall back to the old shared codevision env; it was polluted by package
+# upgrades and no longer imports Qwen3-VL/verl reliably.
+CODEVISION_ENV="${CODEVISION_ENV:-/mnt/cpfs/delinmao/envs/codevision_new}"
 
 export NCCL_TIMEOUT="${NCCL_TIMEOUT:-1800}"
 export TORCH_DIST_INIT_BARRIER_TIMEOUT="${TORCH_DIST_INIT_BARRIER_TIMEOUT:-1800}"

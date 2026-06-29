@@ -29,7 +29,10 @@ from fractions import Fraction
 
 from verl.utils.reward_score.llmjudge import LLMJudgeClient
 from recipe.codevision.rewards import compute_toolvision_score
-from recipe.codevision.rewards.common import tool_usage_info as _strict_tool_usage_info
+from recipe.codevision.rewards.common import (
+    choice_options_from_extra_info,
+    tool_usage_info as _strict_tool_usage_info,
+)
 
 LLM_JUDGE_CLIENT = LLMJudgeClient(
     base_url=os.getenv("LLM_JUDGE_BASE_URL", ""),
@@ -110,6 +113,11 @@ def _as_list(value) -> list:
         return value
     if isinstance(value, tuple):
         return list(value)
+    if isinstance(value, dict):
+        keys = list(value.keys())
+        if keys and all(str(key).strip().upper() in "ABCDEFGH" for key in keys):
+            return [value[key] for key in sorted(keys, key=lambda item: str(item).strip().upper())]
+        return list(value.values())
     if hasattr(value, "tolist"):
         return _as_list(value.tolist())
     if isinstance(value, str):
@@ -155,6 +163,20 @@ def _source_benchmark(data_source: str, extra_info: dict | None) -> str:
         return "pixmo_count"
     if source.startswith("countqa"):
         return "countqa"
+    if source.startswith("docvqa"):
+        return "docvqa"
+    if source.startswith("infovqa") or source.startswith("infographicvqa"):
+        return "infovqa"
+    if source.startswith("mme_realworld") or source.startswith("mmerealworld"):
+        return "mme_realworld"
+    if source.startswith("realworldqa"):
+        return "realworldqa"
+    if source.startswith("mmstar"):
+        return "mmstar"
+    if source.startswith("mmvet_hard"):
+        return "mmvet_hard"
+    if source.startswith("mmvet"):
+        return "mmvet"
     if source.startswith("spatialmqa"):
         return "spatialmqa"
     return source
@@ -289,14 +311,51 @@ def _extract_choice_answer(prediction: str, options: list | None = None) -> str 
 
 def _multiple_choice_score(prediction: str, ground_truth: str, extra_info: dict | None = None) -> float:
     extra_info = extra_info or {}
-    option_value = extra_info.get("choices")
-    if option_value is None:
-        option_value = extra_info.get("options")
-    options = _as_list(option_value)
+    options = choice_options_from_extra_info(extra_info)
     extracted_pred = _extract_choice_answer(prediction, options)
     if extracted_pred is None:
         return 0.0
     return 1.0 if extracted_pred.upper() == str(ground_truth).strip().upper() else 0.0
+
+
+def _levenshtein_distance(a: str, b: str) -> int:
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    previous = list(range(len(b) + 1))
+    for i, char_a in enumerate(a, start=1):
+        current = [i]
+        for j, char_b in enumerate(b, start=1):
+            insert = current[j - 1] + 1
+            delete = previous[j] + 1
+            substitute = previous[j - 1] + (char_a != char_b)
+            current.append(min(insert, delete, substitute))
+        previous = current
+    return previous[-1]
+
+
+def _anls_score(prediction: str, ground_truth: str, extra_info: dict | None = None) -> float:
+    prediction_norm = re.sub(r"\s+", " ", str(prediction or "").strip().lower())
+    candidates = []
+    if extra_info:
+        candidates.extend(_as_list(extra_info.get("answers")))
+        candidates.extend(_as_list(extra_info.get("acceptable_answers")))
+    candidates.extend(_as_list(ground_truth))
+    best = 0.0
+    for candidate in candidates:
+        target = re.sub(r"\s+", " ", str(candidate or "").strip().lower())
+        if not target and not prediction_norm:
+            best = max(best, 1.0)
+            continue
+        denom = max(len(prediction_norm), len(target))
+        if denom <= 0:
+            continue
+        nls = 1.0 - (_levenshtein_distance(prediction_norm, target) / denom)
+        best = max(best, nls if nls >= 0.5 else 0.0)
+    return best
 
 
 def _normalize_count_answer(answer) -> str:
@@ -386,10 +445,25 @@ def _official_like_score(answer: str | None, ground_truth: str, data_source: str
         return _choice_score(answer, ground_truth)
     if benchmark == "hrbench":
         return _hrbench_score(answer, ground_truth, extra_info)
-    if benchmark in {"cvbench", "spatialmqa"}:
+    if benchmark in {"cvbench", "spatialmqa", "arxivqa", "ai2d", "mmstar", "sat2", "virgorlsa"}:
         return _multiple_choice_score(answer, ground_truth, extra_info)
+    if benchmark in {"mme_realworld", "mme_realworld_lite", "mme_realworld_cn", "mmerealworld", "mmerealworld_lite", "mmerealworld_cn"}:
+        return _multiple_choice_score(answer, ground_truth, extra_info)
+    if benchmark == "realworldqa":
+        target = str(ground_truth or "").strip()
+        if target.upper() in {"A", "B", "C", "D"}:
+            return _multiple_choice_score(answer, ground_truth, extra_info)
+        return 1.0 if str(answer or "").strip().lower().rstrip(".") == target.lower().rstrip(".") else 0.0
+    if benchmark in {"docvqa", "infovqa", "infographicvqa"}:
+        return _anls_score(answer, ground_truth, extra_info)
+    if benchmark in {"mmvet", "mmvet_hard"}:
+        # MMVet official scoring is LLM-judge based. Keep the deterministic
+        # official-like field at 0.0 and let llmjudge_fallback_score carry the
+        # actual score when judge is enabled.
+        return 0.0
     if benchmark == "countbench":
-        # Current local CountBench is numeric, not the Qwen3-VL report MCQ version.
+        # Current local CountBenchQA-491 follows the common lmms numeric QA
+        # protocol and matches the Qwen3-VL report baseline scale.
         return _countbench_score(answer, ground_truth)
     if benchmark in {"pixmo_count", "pixmo_count_lmms", "countqa"}:
         return _numeric_count_metrics(answer, ground_truth)["score"]

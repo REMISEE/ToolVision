@@ -32,6 +32,9 @@ JOB_NAME="${JOB_NAME:-cv-curprompt-eval-matrix}"
 WORKER_IMAGE="${WORKER_IMAGE:-dsw-registry-vpc.cn-wulanchabu.cr.aliyuncs.com/pai/torcheasyrec:1.1.0-pytorch2.10.0-gpu-py311-cu129-ubuntu22.04}"
 
 MODEL_PATH="${MODEL_PATH:-/mnt/cpfs/delinmao/CodeVision/LLaMA-Factory/saves/qwen3vl-8b/sft-mix200-simple-notool-sp3-v03}"
+BENCHMARK_ROOT="${BENCHMARK_ROOT:-/mnt/cpfs/delinmao/Benchmarks}"
+RESUME_MODE="${RESUME_MODE:-auto}"
+RESUME_FROM_PATH="${RESUME_FROM_PATH:-null}"
 SYSTEM_PROMPT_PATH="${SYSTEM_PROMPT_PATH:-recipe/codevision/config/sp3.txt}"
 TOOL_CFG_TEMPLATE_PATH="${TOOL_CFG_TEMPLATE_PATH:-recipe/codevision/config/code_image_tool_config_v03_sftclean.yaml}"
 PROJECT_NAME="${PROJECT_NAME:-CodeVision}"
@@ -42,6 +45,7 @@ TEMPERATURES="${TEMPERATURES:-0 0.7}"
 NGPUS_PER_NODE="${NGPUS_PER_NODE:-4}"
 INFER_TP_SIZE="${INFER_TP_SIZE:-4}"
 VAL_BSZ="${VAL_BSZ:-32}"
+N_RESP_PER_PROMPT="${N_RESP_PER_PROMPT:-1}"
 VAL_N_RESP_PER_PROMPT="${VAL_N_RESP_PER_PROMPT:-1}"
 MAX_TURNS="${MAX_TURNS:-12}"
 ROLLOUT_MAX_TOKENS_PER_TURN="${ROLLOUT_MAX_TOKENS_PER_TURN:-2048}"
@@ -64,6 +68,9 @@ TRAIN_COMMAND="cd $(shell_quote "${ROOT_DIR}") &&"
 append_env JOB_NAME "${JOB_NAME}"
 append_env TRAIN_SCRIPT "recipe/codevision/eval_current_prompt_tool_matrix.sh"
 append_env MODEL_PATH "${MODEL_PATH}"
+append_env BENCHMARK_ROOT "${BENCHMARK_ROOT}"
+append_env RESUME_MODE "${RESUME_MODE}"
+append_env RESUME_FROM_PATH "${RESUME_FROM_PATH}"
 append_env TOOL_CFG_TEMPLATE_PATH "${TOOL_CFG_TEMPLATE_PATH}"
 append_env SYSTEM_PROMPT_PATH "${SYSTEM_PROMPT_PATH}"
 append_env PROJECT_NAME "${PROJECT_NAME}"
@@ -74,12 +81,14 @@ append_env OCR_BASE_URL "${OCR_BASE_URL}"
 append_env GROUNDEDSAM2_BASE_URL "${GROUNDEDSAM2_BASE_URL}"
 append_env DEPTH_BASE_URL "${DEPTH_BASE_URL}"
 append_env COUNTGD_BASE_URL "${COUNTGD_BASE_URL}"
+append_env CODEVISION_ENV "${CODEVISION_ENV:-/mnt/cpfs/delinmao/envs/codevision_new}"
 append_env DLC_ENTRYPOINT_DEBUG "${DLC_ENTRYPOINT_DEBUG:-1}"
 append_env RAY_NODE_CHECK_TIMEOUT_SECONDS "${RAY_NODE_CHECK_TIMEOUT_SECONDS:-20}"
 append_env TOOL_PREFLIGHT_CHECK "${TOOL_PREFLIGHT_CHECK:-1}"
 append_env NGPUS_PER_NODE "${NGPUS_PER_NODE}"
 append_env INFER_TP_SIZE "${INFER_TP_SIZE}"
 append_env VAL_BSZ "${VAL_BSZ}"
+append_env N_RESP_PER_PROMPT "${N_RESP_PER_PROMPT}"
 append_env VAL_N_RESP_PER_PROMPT "${VAL_N_RESP_PER_PROMPT}"
 append_env MAX_TURNS "${MAX_TURNS}"
 append_env ROLLOUT_MAX_TOKENS_PER_TURN "${ROLLOUT_MAX_TOKENS_PER_TURN}"
@@ -92,6 +101,8 @@ echo "Submitting ${JOB_NAME}"
 echo "DATASETS=${DATASETS}"
 echo "TEMPERATURES=${TEMPERATURES}"
 echo "MODEL_PATH=${MODEL_PATH}"
+echo "RESUME_MODE=${RESUME_MODE}"
+echo "RESUME_FROM_PATH=${RESUME_FROM_PATH}"
 echo "SYSTEM_PROMPT_PATH=${SYSTEM_PROMPT_PATH}"
 echo "TOOL_CFG_TEMPLATE_PATH=${TOOL_CFG_TEMPLATE_PATH}"
 echo "OCR_BASE_URL=${OCR_BASE_URL}"
@@ -99,6 +110,7 @@ echo "GROUNDEDSAM2_BASE_URL=${GROUNDEDSAM2_BASE_URL}"
 echo "DEPTH_BASE_URL=${DEPTH_BASE_URL}"
 echo "COUNTGD_BASE_URL=${COUNTGD_BASE_URL}"
 echo "NGPUS_PER_NODE=${NGPUS_PER_NODE}"
+echo "N_RESP_PER_PROMPT=${N_RESP_PER_PROMPT}"
 echo "VAL_N_RESP_PER_PROMPT=${VAL_N_RESP_PER_PROMPT}"
 
 if [[ "${DRY_RUN}" == "1" || "${DRY_RUN,,}" == "true" ]]; then
@@ -111,8 +123,8 @@ fi
   --name="${JOB_NAME}" \
   --command="${TRAIN_COMMAND}" \
   --data_source_uris="${DATA_SOURCE_URIS:-cpfs://cpfs-298fffb575a502fe.cn-wulanchabu/ptc-29f47d9393ad2b16/exp-29f2869e7d984aa6/::/mnt/cpfs,oss://pai-wlcb-ai-oss.oss-cn-wulanchabu-internal.aliyuncs.com/::/mnt/oss}" \
-  --resource_id="${RESOURCE_ID:-quota1hdkwah70tk}" \
-  --workspace_id="${WORKSPACE_ID:-245264}" \
+  --resource_id="${RESOURCE_ID:-quotaev2tl4w6aw0}" \
+  --workspace_id="${WORKSPACE_ID:-240810}" \
   --vpc_id="${VPC_ID:-vpc-0jl5rpw5qokp6p2ettip6}" \
   --switch_id="${SWITCH_ID:-vsw-0jlmr9rjzed093yr9c0kz}" \
   --security_group_id="${SECURITY_GROUP_ID:-sg-0jl0pd5qaerdj75wmred}" \

@@ -47,6 +47,7 @@ COUNTGD_BASE_URL="${COUNTGD_BASE_URL:-}"
 
 train_bsz="${TRAIN_BSZ:-64}"
 val_bsz="${VAL_BSZ:-256}"
+data_shuffle="${DATA_SHUFFLE:-True}"
 train_mini_bsz="${TRAIN_MINI_BSZ:-32}"
 train_micro_bsz_per_gpu="${TRAIN_MICRO_BSZ_PER_GPU:-1}"
 infer_micro_bsz_per_gpu="${INFER_MICRO_BSZ_PER_GPU:-1}"
@@ -89,6 +90,9 @@ tool_reward_overuse_threshold="${TOOL_REWARD_OVERUSE_THRESHOLD:-4}"
 # Default 0.0 keeps legacy/rnec_only/simple_penalty modes unchanged.
 tool_reward_clean_tool_weight="${TOOL_REWARD_CLEAN_TOOL_WEIGHT:-0.0}"
 tool_reward_clean_tool_baseline_weight="${TOOL_REWARD_CLEAN_TOOL_BASELINE_WEIGHT:-0.05}"
+tool_reward_mut_protocol_weight="${TOOL_REWARD_MUT_PROTOCOL_WEIGHT:-0.2}"
+tool_reward_mut_turn_penalty_weight="${TOOL_REWARD_MUT_TURN_PENALTY_WEIGHT:-0.05}"
+tool_reward_mut_turn_penalty_threshold="${TOOL_REWARD_MUT_TURN_PENALTY_THRESHOLD:-6}"
 format_reward_weight="${FORMAT_REWARD_WEIGHT:-0.2}"
 # Async reward computation: fire reward_fn as a Ray future at the start of the
 # reward stage and only block on it right before advantage compute. The reward
@@ -117,6 +121,8 @@ test_freq="${TEST_FREQ:-20}"
 save_freq="${SAVE_FREQ:-50}"
 max_actor_ckpt_to_keep="${MAX_ACTOR_CKPT_TO_KEEP:-5}"
 max_critic_ckpt_to_keep="${MAX_CRITIC_CKPT_TO_KEEP:-5}"
+resume_mode="${RESUME_MODE:-auto}"
+resume_from_path="${RESUME_FROM_PATH:-null}"
 total_epochs="${TOTAL_EPOCHS:-1}"
 total_training_steps="${TOTAL_TRAINING_STEPS:-null}"
 log_val_generations="${LOG_VAL_GENERATIONS:-8}"
@@ -195,6 +201,8 @@ echo "RAY_INIT_ADDRESS=${RAY_INIT_ADDRESS}"
 echo "SET_RAY_INIT_ADDRESS=${SET_RAY_INIT_ADDRESS}"
 echo "SAVE_FREQ=${save_freq}"
 echo "MAX_ACTOR_CKPT_TO_KEEP=${max_actor_ckpt_to_keep}"
+echo "RESUME_MODE=${resume_mode}"
+echo "RESUME_FROM_PATH=${resume_from_path}"
 echo "ROLLOUT_DATA_DIR=${rollout_data_dir}"
 echo "ROLLOUT_TEMPERATURE=${rollout_temperature}"
 echo "ROLLOUT_TOP_P=${rollout_top_p}"
@@ -202,6 +210,11 @@ echo "ROLLOUT_DO_SAMPLE=${rollout_do_sample}"
 echo "ROLLOUT_MAX_TOKENS_PER_TURN=${rollout_max_tokens_per_turn}"
 echo "ROLLOUT_ENABLE_PREFIX_CACHING=${enable_prefix_caching}"
 echo "MAX_NUM_SEQS=${max_num_seqs}"
+echo "TOOL_REWARD_MODE=${tool_reward_mode}"
+echo "TOOL_REWARD_MUT_PROTOCOL_WEIGHT=${tool_reward_mut_protocol_weight}"
+echo "TOOL_REWARD_MUT_TURN_PENALTY_WEIGHT=${tool_reward_mut_turn_penalty_weight}"
+echo "TOOL_REWARD_MUT_TURN_PENALTY_THRESHOLD=${tool_reward_mut_turn_penalty_threshold}"
+echo "FORMAT_REWARD_WEIGHT=${format_reward_weight}"
 
 if [[ "${DISABLE_TOOL_PROXY:-1}" == "1" ]]; then
     unset http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY
@@ -258,6 +271,7 @@ python3 -m verl.trainer.main_ppo \
     algorithm.kl_ctrl.kl_coef=${kl_coef} \
     data.train_batch_size=${train_bsz} \
     data.val_batch_size=${val_bsz} \
+    data.shuffle=${data_shuffle} \
     data.max_prompt_length=${max_prompt_len} \
     data.max_response_length=${max_resp_len} \
     data.filter_overlong_prompts=False \
@@ -328,6 +342,9 @@ python3 -m verl.trainer.main_ppo \
     +reward_model.tool_reward.overuse_threshold=${tool_reward_overuse_threshold} \
     +reward_model.tool_reward.clean_tool_weight=${tool_reward_clean_tool_weight} \
     +reward_model.tool_reward.clean_tool_baseline_weight=${tool_reward_clean_tool_baseline_weight} \
+    +reward_model.tool_reward.mut_protocol_weight=${tool_reward_mut_protocol_weight} \
+    +reward_model.tool_reward.mut_turn_penalty_weight=${tool_reward_mut_turn_penalty_weight} \
+    +reward_model.tool_reward.mut_turn_penalty_threshold=${tool_reward_mut_turn_penalty_threshold} \
     reward_model.launch_reward_fn_async=${reward_launch_async} \
     +reward_model.format_reward_weight=${format_reward_weight} \
     +reward_model.exec_reward_weight=${exec_reward_weight} \
@@ -354,6 +371,7 @@ python3 -m verl.trainer.main_ppo \
     trainer.total_epochs=${total_epochs} \
     trainer.total_training_steps=${total_training_steps} \
     trainer.default_local_dir=${SAVE_DIR} \
-    trainer.resume_mode=auto \
+    trainer.resume_mode=${resume_mode} \
+    trainer.resume_from_path=${resume_from_path} \
     ray_kwargs.ray_init.num_cpus=${RAY_INIT_NUM_CPUS:-null} \
     "${RAY_INIT_OVERRIDES[@]}"

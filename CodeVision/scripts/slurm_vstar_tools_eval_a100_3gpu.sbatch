@@ -18,7 +18,7 @@ SERVICE_LOG_DIR="${RUN_DIR}/service_logs"
 SERVICE_PID_DIR="${RUN_DIR}/service_pids"
 RAY_TMPDIR="${RAY_TMPDIR:-${WORKSPACE_ROOT}/ray_tmp/vstar_tools_eval_3gpu}"
 
-CODEVISION_ENV="${CODEVISION_ENV:-codevision}"
+CODEVISION_ENV="${CODEVISION_ENV:-codevision_new}"
 
 mkdir -p "${RUN_DIR}" "${SERVICE_LOG_DIR}" "${SERVICE_PID_DIR}" "${RAY_TMPDIR}"
 

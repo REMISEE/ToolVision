@@ -2074,6 +2074,22 @@ class RayPPOTrainer:
                                     "request_id",
                                     batch.non_tensor_batch["request_id"].tolist(),
                                 )
+                            for key in (
+                                "R_acc",
+                                "R_fmt",
+                                "R_protocol",
+                                "R_mut",
+                                "MutWeight",
+                                "P_regular_tool",
+                                "P_turn_overuse",
+                                "R_total",
+                                "NumTurns",
+                            ):
+                                if key in batch.non_tensor_batch:
+                                    values = batch.non_tensor_batch[key]
+                                    if hasattr(values, "tolist"):
+                                        values = values.tolist()
+                                    reward_extra_infos_dict.setdefault(key, values)
 
                             self._dump_generations(
                                 inputs=inputs,

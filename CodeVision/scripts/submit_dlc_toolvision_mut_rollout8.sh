@@ -7,7 +7,9 @@ set -euo pipefail
 ROOT_DIR="${ROOT_DIR:-/mnt/cpfs/delinmao/ToolVision/CodeVision}"
 DLC_BIN="${DLC_BIN:-$(command -v dlc_pai 2>/dev/null || command -v dlc 2>/dev/null || echo /etc/dsw/runtime/export_bin/dlc)}"
 
-eval "$("${ROOT_DIR}/scripts/dsw_tool_urls.sh")"
+if [[ -z "${OCR_BASE_URL:-}" || -z "${GROUNDEDSAM2_BASE_URL:-}" || -z "${DEPTH_BASE_URL:-}" || -z "${COUNTGD_BASE_URL:-}" ]]; then
+  eval "$("${ROOT_DIR}/scripts/dsw_tool_urls.sh")"
+fi
 
 check_tool_port() {
   local name="$1"
@@ -18,7 +20,7 @@ check_tool_port() {
   if ! timeout 2 bash -lc "</dev/tcp/${host}/${port}" >/dev/null 2>&1; then
     echo "Tool service ${name} is not reachable at ${url}." >&2
     echo "Start services first: bash scripts/start_dsw_tool_services.sh" >&2
-    echo "Or set DSW_TOOL_HOST/OCR_PORT/GROUNDEDSAM2_PORT/DEPTH_PORT/COUNTGD_PORT explicitly." >&2
+    echo "Or set OCR_BASE_URL/GROUNDEDSAM2_BASE_URL/DEPTH_BASE_URL/COUNTGD_BASE_URL explicitly." >&2
     exit 1
   fi
 }
@@ -93,6 +95,7 @@ append_env OCR_BASE_URL "${OCR_BASE_URL}"
 append_env GROUNDEDSAM2_BASE_URL "${GROUNDEDSAM2_BASE_URL}"
 append_env DEPTH_BASE_URL "${DEPTH_BASE_URL}"
 append_env COUNTGD_BASE_URL "${COUNTGD_BASE_URL}"
+append_env CODEVISION_ENV "${CODEVISION_ENV:-/mnt/cpfs/delinmao/envs/codevision_new}"
 append_env DLC_ENTRYPOINT_DEBUG "${DLC_ENTRYPOINT_DEBUG:-1}"
 append_env RAY_NODE_CHECK_TIMEOUT_SECONDS "${RAY_NODE_CHECK_TIMEOUT_SECONDS:-20}"
 append_env TOOL_PREFLIGHT_CHECK "${TOOL_PREFLIGHT_CHECK:-1}"
@@ -119,6 +122,8 @@ TRAIN_COMMAND+=" bash scripts/dlc_ray_direct_entrypoint.sh"
 
 echo "Submitting ${JOB_NAME}"
 echo "DLC_BIN=${DLC_BIN}"
+echo "RESOURCE_ID=${RESOURCE_ID:-quotaev2tl4w6aw0}"
+echo "WORKSPACE_ID=${WORKSPACE_ID:-240810}"
 echo "EVAL_PARQUET=${EVAL_PARQUET}"
 echo "EXP_NAME=${EXP_NAME}"
 echo "MODEL_PATH=${MODEL_PATH}"
@@ -150,8 +155,8 @@ fi
   --name="${JOB_NAME}" \
   --command="${TRAIN_COMMAND}" \
   --data_source_uris="${DATA_SOURCE_URIS:-cpfs://cpfs-298fffb575a502fe.cn-wulanchabu/ptc-29f47d9393ad2b16/exp-29f2869e7d984aa6/::/mnt/cpfs,oss://pai-wlcb-ai-oss.oss-cn-wulanchabu-internal.aliyuncs.com/::/mnt/oss}" \
-  --resource_id="${RESOURCE_ID:-quota1hdkwah70tk}" \
-  --workspace_id="${WORKSPACE_ID:-245264}" \
+  --resource_id="${RESOURCE_ID:-quotaev2tl4w6aw0}" \
+  --workspace_id="${WORKSPACE_ID:-240810}" \
   --vpc_id="${VPC_ID:-vpc-0jl5rpw5qokp6p2ettip6}" \
   --switch_id="${SWITCH_ID:-vsw-0jlmr9rjzed093yr9c0kz}" \
   --security_group_id="${SECURITY_GROUP_ID:-sg-0jl0pd5qaerdj75wmred}" \

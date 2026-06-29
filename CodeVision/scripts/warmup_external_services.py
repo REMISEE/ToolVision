@@ -104,7 +104,16 @@ def warmup_groundedsam2(*, host: str, port: int, timeout_s: float, image_b64: st
         raise RuntimeError(f"GroundedSAM2 warmup failed: {data}")
 
 
-def warmup_depth(*, host: str, port: int, timeout_s: float, image_b64: str) -> None:
+def warmup_depth(
+    *,
+    host: str,
+    port: int,
+    timeout_s: float,
+    image_b64: str,
+    groundedsam2_host: str | None = None,
+    groundedsam2_port: int | None = None,
+    groundedsam2_image_b64: str | None = None,
+) -> None:
     wait_for_http(f"http://{host}:{port}/healthy", timeout_s)
     payload = {
         "file": image_b64,
@@ -117,6 +126,20 @@ def warmup_depth(*, host: str, port: int, timeout_s: float, image_b64: str) -> N
     data = post_json(f"http://{host}:{port}/infer", payload, timeout_s)
     if int(data.get("errorCode", -1)) != 0:
         raise RuntimeError(f"Depth warmup failed: {data}")
+    if groundedsam2_host is None or groundedsam2_port is None:
+        return
+    ground_payload = {
+        "file": groundedsam2_image_b64 or image_b64,
+        "file_type": 1,
+        "operation": "ground_depth",
+        "text_prompt": "object.",
+        "vis_mode": "overlay",
+        "stat": "median",
+        "padding": 0,
+    }
+    ground_data = post_json(f"http://{host}:{port}/infer", ground_payload, timeout_s)
+    if int(ground_data.get("errorCode", -1)) != 0:
+        raise RuntimeError(f"Depth ground_depth warmup failed: {ground_data}")
 
 
 def warmup_countgd(*, host: str, port: int, timeout_s: float, image_b64: str) -> None:
@@ -192,6 +215,9 @@ def main() -> None:
                     port=args.depth_port,
                     timeout_s=args.timeout_s,
                     image_b64=image_b64,
+                    groundedsam2_host=args.groundedsam2_host if args.target == "all" else None,
+                    groundedsam2_port=args.groundedsam2_port if args.target == "all" else None,
+                    groundedsam2_image_b64=groundedsam2_image_b64,
                 ),
             )
         )

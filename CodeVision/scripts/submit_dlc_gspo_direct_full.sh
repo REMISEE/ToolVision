@@ -9,7 +9,9 @@ set -euo pipefail
 ROOT_DIR="${ROOT_DIR:-/mnt/cpfs/delinmao/ToolVision/CodeVision}"
 DLC_BIN="${DLC_BIN:-dlc_pai}"
 
-eval "$("${ROOT_DIR}/scripts/dsw_tool_urls.sh")"
+if [[ -z "${OCR_BASE_URL:-}" || -z "${GROUNDEDSAM2_BASE_URL:-}" || -z "${DEPTH_BASE_URL:-}" || -z "${COUNTGD_BASE_URL:-}" ]]; then
+  eval "$("${ROOT_DIR}/scripts/dsw_tool_urls.sh")"
+fi
 
 check_tool_port() {
   local name="$1"
@@ -33,6 +35,7 @@ fi
 
 JOB_NAME="${JOB_NAME:-codevision_gspo_direct_full26k}"
 WORKER_IMAGE="${WORKER_IMAGE:-dsw-registry-vpc.cn-wulanchabu.cr.aliyuncs.com/pai/torcheasyrec:1.1.0-pytorch2.10.0-gpu-py311-cu129-ubuntu22.04}"
+CODEVISION_ENV="${CODEVISION_ENV:-/mnt/cpfs/delinmao/envs/codevision_new}"
 MODEL_PATH="${MODEL_PATH:-/mnt/cpfs/delinmao/CodeVision/LLaMA-Factory/saves/qwen3vl-8b/sft-mix200-simple-notool-sp3-v03}"
 TOOL_CFG_TEMPLATE_PATH="${TOOL_CFG_TEMPLATE_PATH:-recipe/codevision/config/code_image_tool_config_v03_sftclean.yaml}"
 SYSTEM_PROMPT_PATH="${SYSTEM_PROMPT_PATH:-recipe/codevision/config/sp3.txt}"
@@ -114,6 +117,7 @@ append_env OCR_BASE_URL "${OCR_BASE_URL}"
 append_env GROUNDEDSAM2_BASE_URL "${GROUNDEDSAM2_BASE_URL}"
 append_env DEPTH_BASE_URL "${DEPTH_BASE_URL}"
 append_env COUNTGD_BASE_URL "${COUNTGD_BASE_URL}"
+append_env CODEVISION_ENV "${CODEVISION_ENV}"
 append_env DLC_ENTRYPOINT_DEBUG "${DLC_ENTRYPOINT_DEBUG:-1}"
 append_env RAY_NODE_CHECK_TIMEOUT_SECONDS "${RAY_NODE_CHECK_TIMEOUT_SECONDS:-20}"
 append_env TOOL_PREFLIGHT_CHECK "${TOOL_PREFLIGHT_CHECK:-1}"
@@ -125,7 +129,10 @@ append_env TEST_FREQ "${TEST_FREQ:--1}"
 append_env SAVE_FREQ "${SAVE_FREQ:-50}"
 append_env MAX_ACTOR_CKPT_TO_KEEP "${MAX_ACTOR_CKPT_TO_KEEP:-5}"
 append_env MAX_CRITIC_CKPT_TO_KEEP "${MAX_CRITIC_CKPT_TO_KEEP:-5}"
+append_env RESUME_MODE "${RESUME_MODE:-auto}"
+append_env RESUME_FROM_PATH "${RESUME_FROM_PATH:-null}"
 append_env TRAIN_BSZ "${TRAIN_BSZ:-64}"
+append_env DATA_SHUFFLE "${DATA_SHUFFLE:-True}"
 append_env TRAIN_MINI_BSZ "${TRAIN_MINI_BSZ:-32}"
 append_env TRAIN_MICRO_BSZ_PER_GPU "${TRAIN_MICRO_BSZ_PER_GPU:-1}"
 append_env INFER_MICRO_BSZ_PER_GPU "${INFER_MICRO_BSZ_PER_GPU:-1}"
@@ -154,6 +161,9 @@ append_env TOOL_REWARD_INVALID_CALL_WEIGHT "${TOOL_REWARD_INVALID_CALL_WEIGHT:-0
 append_env TOOL_REWARD_OVERUSE_THRESHOLD "${TOOL_REWARD_OVERUSE_THRESHOLD:-4}"
 append_env TOOL_REWARD_CLEAN_TOOL_WEIGHT "${TOOL_REWARD_CLEAN_TOOL_WEIGHT:-0.0}"
 append_env TOOL_REWARD_CLEAN_TOOL_BASELINE_WEIGHT "${TOOL_REWARD_CLEAN_TOOL_BASELINE_WEIGHT:-0.05}"
+append_env TOOL_REWARD_MUT_PROTOCOL_WEIGHT "${TOOL_REWARD_MUT_PROTOCOL_WEIGHT:-0.2}"
+append_env TOOL_REWARD_MUT_TURN_PENALTY_WEIGHT "${TOOL_REWARD_MUT_TURN_PENALTY_WEIGHT:-0.05}"
+append_env TOOL_REWARD_MUT_TURN_PENALTY_THRESHOLD "${TOOL_REWARD_MUT_TURN_PENALTY_THRESHOLD:-6}"
 append_env REWARD_LAUNCH_ASYNC "${REWARD_LAUNCH_ASYNC:-False}"
 append_env LOG_TRAIN_GENERATIONS "${LOG_TRAIN_GENERATIONS:-8}"
 append_env LOG_VAL_GENERATIONS "${LOG_VAL_GENERATIONS:-8}"
@@ -193,14 +203,18 @@ echo "OCR_BASE_URL=${OCR_BASE_URL}"
 echo "GROUNDEDSAM2_BASE_URL=${GROUNDEDSAM2_BASE_URL}"
 echo "DEPTH_BASE_URL=${DEPTH_BASE_URL}"
 echo "COUNTGD_BASE_URL=${COUNTGD_BASE_URL}"
+echo "CODEVISION_ENV=${CODEVISION_ENV}"
 echo "ENABLE_WANDB=${ENABLE_WANDB}"
 echo "ENABLE_LLM_JUDGE=${ENABLE_LLM_JUDGE}"
 echo "LLM_JUDGE_BASE_URL=$([[ -n "${LLM_JUDGE_BASE_URL}" ]] && echo "${LLM_JUDGE_BASE_URL}" || echo '<unset>')"
 echo "LLM_JUDGE_MODEL_NAME=$([[ -n "${LLM_JUDGE_MODEL_NAME}" ]] && echo "${LLM_JUDGE_MODEL_NAME}" || echo '<unset>')"
 echo "TRAIN_BSZ=${TRAIN_BSZ:-64}"
+echo "DATA_SHUFFLE=${DATA_SHUFFLE:-True}"
 echo "N_RESP_PER_PROMPT=${N_RESP_PER_PROMPT:-8}"
 echo "TOTAL_EPOCHS=${TOTAL_EPOCHS:-1}"
 echo "SAVE_FREQ=${SAVE_FREQ:-50}"
+echo "RESUME_MODE=${RESUME_MODE:-auto}"
+echo "RESUME_FROM_PATH=${RESUME_FROM_PATH:-null}"
 echo "ROLLOUT_TEMPERATURE=${ROLLOUT_TEMPERATURE:-0.7}"
 echo "ROLLOUT_TOP_P=${ROLLOUT_TOP_P:-0.95}"
 echo "ROLLOUT_DO_SAMPLE=${ROLLOUT_DO_SAMPLE:-True}"
@@ -210,6 +224,9 @@ echo "MAX_NUM_SEQS=${MAX_NUM_SEQS:-1024}"
 echo "ROLLOUT_DATA_DIR=${ROLLOUT_DATA_DIR:-${SAVE_DIR}/rollout_generations}"
 echo "TOOL_REWARD_MODE=${TOOL_REWARD_MODE:-simple_penalty}"
 echo "TOOL_REWARD_BETA=${TOOL_REWARD_BETA:-0.0}"
+echo "TOOL_REWARD_MUT_PROTOCOL_WEIGHT=${TOOL_REWARD_MUT_PROTOCOL_WEIGHT:-0.2}"
+echo "TOOL_REWARD_MUT_TURN_PENALTY_WEIGHT=${TOOL_REWARD_MUT_TURN_PENALTY_WEIGHT:-0.05}"
+echo "TOOL_REWARD_MUT_TURN_PENALTY_THRESHOLD=${TOOL_REWARD_MUT_TURN_PENALTY_THRESHOLD:-6}"
 echo "FORMAT_REWARD_WEIGHT=${FORMAT_REWARD_WEIGHT:-0.2}"
 
 dry_run_flag="${DRY_RUN:-0}"
@@ -229,8 +246,8 @@ fi
   --name="${JOB_NAME}" \
   --command="${TRAIN_COMMAND}" \
   --data_source_uris="${DATA_SOURCE_URIS:-cpfs://cpfs-298fffb575a502fe.cn-wulanchabu/ptc-29f47d9393ad2b16/exp-29f2869e7d984aa6/::/mnt/cpfs,oss://pai-wlcb-ai-oss.oss-cn-wulanchabu-internal.aliyuncs.com/::/mnt/oss}" \
-  --resource_id="${RESOURCE_ID:-quota1hdkwah70tk}" \
-  --workspace_id="${WORKSPACE_ID:-245264}" \
+  --resource_id="${RESOURCE_ID:-quotaev2tl4w6aw0}" \
+  --workspace_id="${WORKSPACE_ID:-240810}" \
   --vpc_id="${VPC_ID:-vpc-0jl5rpw5qokp6p2ettip6}" \
   --switch_id="${SWITCH_ID:-vsw-0jlmr9rjzed093yr9c0kz}" \
   --security_group_id="${SECURITY_GROUP_ID:-sg-0jl0pd5qaerdj75wmred}" \

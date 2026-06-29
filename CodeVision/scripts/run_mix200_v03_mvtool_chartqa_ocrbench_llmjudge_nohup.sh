@@ -17,7 +17,7 @@ if [[ -z "${LLM_JUDGE_API_KEY:-}" ]]; then
   export LLM_JUDGE_API_KEY
 fi
 
-CODEVISION_ENV="${CODEVISION_ENV:-/mnt/cpfs/delinmao/envs/codevision}" \
+CODEVISION_ENV="${CODEVISION_ENV:-/mnt/cpfs/delinmao/envs/codevision_new}" \
 GPU_CANDIDATES="${GPU_CANDIDATES:-2,3,4,5,6}" \
 RAY_INIT_NUM_CPUS="${RAY_INIT_NUM_CPUS:-40}" \
 MODEL_PATH="${MODEL_PATH:-/mnt/cpfs/delinmao/CodeVision/LLaMA-Factory/saves/qwen3vl-8b/sft-mix200-simple-notool}" \

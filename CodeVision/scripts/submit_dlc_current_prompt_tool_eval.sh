@@ -80,11 +80,62 @@ dataset_parquet() {
     fsc147)
       echo "/mnt/cpfs/delinmao/Benchmarks/FSC147/fsc147_val_codevision_eval.parquet"
       ;;
+    fsc147_test)
+      echo "/mnt/cpfs/delinmao/Benchmarks/FSC147/fsc147_test_codevision_eval.parquet"
+      ;;
     ocrbench)
       echo "/mnt/cpfs/delinmao/Benchmarks/OCRBench/ocrbench_codevision_eval.parquet"
       ;;
+    countbench)
+      echo "/mnt/cpfs/delinmao/Benchmarks/countbench/countbench_codevision_eval.parquet"
+      ;;
+    vstar)
+      echo "/mnt/cpfs/delinmao/Benchmarks/vstar-bench/vstar_codevision_eval.parquet"
+      ;;
+    hrbench4k)
+      echo "/mnt/cpfs/delinmao/Benchmarks/HR-Bench/hr_bench_4k_codevision_eval.parquet"
+      ;;
+    hrbench8k)
+      echo "/mnt/cpfs/delinmao/Benchmarks/HR-Bench/hr_bench_8k_codevision_eval.parquet"
+      ;;
+    arxivqa)
+      echo "/mnt/cpfs/delinmao/Benchmarks/ArxivQA/arxivqa_codevision_eval.parquet"
+      ;;
+    docvqa|docvqa_val)
+      echo "/mnt/cpfs/delinmao/Benchmarks/DocVQA/docvqa_val_codevision_eval.parquet"
+      ;;
+    docvqa_test)
+      echo "/mnt/cpfs/delinmao/Benchmarks/DocVQA/docvqa_test_codevision_eval.parquet"
+      ;;
+    infovqa|infovqa_val)
+      echo "/mnt/cpfs/delinmao/Benchmarks/InfoVQA/infovqa_val_codevision_eval.parquet"
+      ;;
+    infovqa_test)
+      echo "/mnt/cpfs/delinmao/Benchmarks/InfoVQA/infovqa_test_codevision_eval.parquet"
+      ;;
+    mme_realworld|mmerealworld)
+      echo "/mnt/cpfs/delinmao/Benchmarks/MME-RealWorld/mme_realworld_codevision_eval.parquet"
+      ;;
+    mme_realworld_lite|mmerealworld_lite)
+      echo "/mnt/cpfs/delinmao/Benchmarks/MME-RealWorld-Lite/mme_realworld_lite_codevision_eval.parquet"
+      ;;
+    mme_realworld_cn|mmerealworld_cn)
+      echo "/mnt/cpfs/delinmao/Benchmarks/MME-RealWorld-CN/mme_realworld_cn_codevision_eval.parquet"
+      ;;
+    realworldqa)
+      echo "/mnt/cpfs/delinmao/Benchmarks/RealWorldQA/realworldqa_codevision_eval.parquet"
+      ;;
+    mmstar)
+      echo "/mnt/cpfs/delinmao/Benchmarks/MMStar/mmstar_codevision_eval.parquet"
+      ;;
+    mmvet)
+      echo "/mnt/cpfs/delinmao/Benchmarks/MMVet/mmvet_codevision_eval.parquet"
+      ;;
+    mmvet_hard)
+      echo "/mnt/cpfs/delinmao/Benchmarks/MMVet-Hard/mmvet_hard_codevision_eval.parquet"
+      ;;
     *)
-      echo "Unknown dataset '$1'. Supported: chartqa, fsc147, ocrbench." >&2
+      echo "Unknown dataset '$1'." >&2
       exit 1
       ;;
   esac
@@ -133,6 +184,7 @@ for dataset in ${DATASETS}; do
     append_env GROUNDEDSAM2_BASE_URL "${GROUNDEDSAM2_BASE_URL}"
     append_env DEPTH_BASE_URL "${DEPTH_BASE_URL}"
     append_env COUNTGD_BASE_URL "${COUNTGD_BASE_URL}"
+    append_env CODEVISION_ENV "${CODEVISION_ENV:-/mnt/cpfs/delinmao/envs/codevision_new}"
     append_env DLC_ENTRYPOINT_DEBUG "${DLC_ENTRYPOINT_DEBUG:-1}"
     append_env RAY_NODE_CHECK_TIMEOUT_SECONDS "${RAY_NODE_CHECK_TIMEOUT_SECONDS:-20}"
     append_env TOOL_PREFLIGHT_CHECK "${TOOL_PREFLIGHT_CHECK:-1}"
@@ -179,8 +231,8 @@ for dataset in ${DATASETS}; do
       --name="${job_name}" \
       --command="${TRAIN_COMMAND}" \
       --data_source_uris="${DATA_SOURCE_URIS:-cpfs://cpfs-298fffb575a502fe.cn-wulanchabu/ptc-29f47d9393ad2b16/exp-29f2869e7d984aa6/::/mnt/cpfs,oss://pai-wlcb-ai-oss.oss-cn-wulanchabu-internal.aliyuncs.com/::/mnt/oss}" \
-      --resource_id="${RESOURCE_ID:-quota1hdkwah70tk}" \
-      --workspace_id="${WORKSPACE_ID:-245264}" \
+      --resource_id="${RESOURCE_ID:-quotaev2tl4w6aw0}" \
+      --workspace_id="${WORKSPACE_ID:-240810}" \
       --vpc_id="${VPC_ID:-vpc-0jl5rpw5qokp6p2ettip6}" \
       --switch_id="${SWITCH_ID:-vsw-0jlmr9rjzed093yr9c0kz}" \
       --security_group_id="${SECURITY_GROUP_ID:-sg-0jl0pd5qaerdj75wmred}" \

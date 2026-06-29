@@ -247,6 +247,12 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = True) -> dict[str,
         "P_bad_tool",
         "P_tool_error",
         "P_invalid_call",
+        # mut_clean / mut_v1 diagnostics.
+        "R_protocol",
+        "R_mut",
+        "MutWeight",
+        "P_regular_tool",
+        "P_turn_overuse",
     ]
 
     for key in reward_component_keys:

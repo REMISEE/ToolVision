@@ -98,6 +98,11 @@ def as_list(value: Any) -> list:
         return value
     if isinstance(value, tuple):
         return list(value)
+    if isinstance(value, dict):
+        keys = list(value.keys())
+        if keys and all(str(key).strip().upper() in "ABCDEFGH" for key in keys):
+            return [value[key] for key in sorted(keys, key=lambda item: str(item).strip().upper())]
+        return list(value.values())
     if hasattr(value, "tolist"):
         return as_list(value.tolist())
     if isinstance(value, str):
@@ -117,6 +122,30 @@ def as_list(value: Any) -> list:
         except Exception:
             pass
     return [value]
+
+
+def choice_options_from_extra_info(extra_info: dict[str, Any] | None) -> list[Any]:
+    extra_info = extra_info or {}
+    option_value = extra_info.get("options")
+    if option_value is None:
+        option_value = extra_info.get("choices")
+    options = as_list(option_value)
+    if options:
+        return options
+    return extract_choice_options_from_question(str(extra_info.get("question") or ""))
+
+
+def extract_choice_options_from_question(question: str) -> list[str]:
+    choices: dict[str, str] = {}
+    for match in re.finditer(r"(?:^|\n)\s*\(?([A-H])\)?[\.\)]\s*([^\n]+)", str(question or "")):
+        choices[match.group(1).upper()] = match.group(2).strip()
+    if not choices:
+        inline = re.findall(r"\b([A-H])[\.\)]\s*([^A-H\n]+?)(?=\s+[A-H][\.\)]|\s*$)", str(question or ""))
+        for letter, text in inline:
+            choices[letter.upper()] = text.strip()
+    if not choices:
+        return []
+    return [choices[key] for key in sorted(choices)]
 
 
 def answer_candidates(ground_truth: Any, extra_info: dict[str, Any] | None = None) -> list[Any]:

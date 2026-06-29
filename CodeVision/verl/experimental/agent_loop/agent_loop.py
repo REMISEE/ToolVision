@@ -1070,6 +1070,15 @@ class AgentLoopManager:
                 is_correct_list=is_correct_list,
             )
             return
+        if mode in {"mut_clean", "mut_v1"}:
+            self._post_aggregate_mut_clean_tool_rewards(
+                output=output,
+                base=base,
+                meta=meta,
+                params=params,
+                is_correct_list=is_correct_list,
+            )
+            return
         if mode in {"simple_penalty", "acc_format_penalty"}:
             self._post_aggregate_simple_penalty_tool_rewards(
                 output=output,
@@ -1164,6 +1173,12 @@ class AgentLoopManager:
             # Default 0.0 keeps legacy/rnec_only/simple_penalty modes unchanged.
             "clean_tool_weight": float(tool_reward_cfg.get("clean_tool_weight", 0.0)),
             "clean_tool_baseline_weight": float(tool_reward_cfg.get("clean_tool_baseline_weight", 0.05)),
+            # MUT v1 clean reward:
+            # R = R_acc + protocol_weight * R_protocol + mut_weight * R_mut
+            #     - turn_penalty_weight * max(0, NumTurns - turn_penalty_threshold)
+            "mut_protocol_weight": float(tool_reward_cfg.get("mut_protocol_weight", 0.2)),
+            "mut_turn_penalty_weight": float(tool_reward_cfg.get("mut_turn_penalty_weight", 0.05)),
+            "mut_turn_penalty_threshold": int(tool_reward_cfg.get("mut_turn_penalty_threshold", 6)),
         }
 
     def _tool_reward_base_scores(self, output: DataProto) -> dict[str, Any]:
@@ -1216,6 +1231,10 @@ class AgentLoopManager:
         tool_exec_error_arr = output.non_tensor_batch.get("tool_exec_error_count")
         tool_exec_success_ratio_arr = output.non_tensor_batch.get("tool_exec_success")
         invalid_tool_call_arr = output.non_tensor_batch.get("invalid_tool_call")
+        mut_weight_arr = output.non_tensor_batch.get("mut_weight")
+        regular_tool_penalty_arr = output.non_tensor_batch.get("regular_tool_penalty")
+        train_group_arr = output.non_tensor_batch.get("train_group")
+        mut_v1_bucket_arr = output.non_tensor_batch.get("mut_v1_bucket")
         if tool_exec_success_ratio_arr is None:
             tool_exec_success_ratio_arr = [0.0] * bsz
         if invalid_tool_call_arr is None:
@@ -1286,6 +1305,40 @@ class AgentLoopManager:
             except Exception:
                 invalid_tool_call_list.append(0.0)
 
+        mut_weight_list: list[float] = []
+        src_mut_weight = mut_weight_arr if mut_weight_arr is not None else [0.0] * bsz
+        for x in src_mut_weight:
+            if isinstance(x, _np.generic):
+                x = x.item()
+            try:
+                mut_weight_list.append(float(x))
+            except Exception:
+                mut_weight_list.append(0.0)
+
+        regular_tool_penalty_list: list[float] = []
+        src_regular_tool_penalty = regular_tool_penalty_arr if regular_tool_penalty_arr is not None else [0.0] * bsz
+        for x in src_regular_tool_penalty:
+            if isinstance(x, _np.generic):
+                x = x.item()
+            try:
+                regular_tool_penalty_list.append(float(x))
+            except Exception:
+                regular_tool_penalty_list.append(0.0)
+
+        train_group_list: list[str] = []
+        src_train_group = train_group_arr if train_group_arr is not None else [""] * bsz
+        for x in src_train_group:
+            if isinstance(x, _np.generic):
+                x = x.item()
+            train_group_list.append(str(x or ""))
+
+        mut_v1_bucket_list: list[str] = []
+        src_mut_v1_bucket = mut_v1_bucket_arr if mut_v1_bucket_arr is not None else [""] * bsz
+        for x in src_mut_v1_bucket:
+            if isinstance(x, _np.generic):
+                x = x.item()
+            mut_v1_bucket_list.append(str(x or ""))
+
         tools_used_list = []
         for x in tools_used_arr:
             if isinstance(x, str):
@@ -1348,6 +1401,10 @@ class AgentLoopManager:
             "tool_exec_success_ratio_list": tool_exec_success_ratio_list,
             "tool_exec_error_count_list": tool_exec_error_count_list,
             "invalid_tool_call_list": invalid_tool_call_list,
+            "mut_weight_list": mut_weight_list,
+            "regular_tool_penalty_list": regular_tool_penalty_list,
+            "train_group_list": train_group_list,
+            "mut_v1_bucket_list": mut_v1_bucket_list,
             "code_count_list": code_count_list,
             "tools_used_list": tools_used_list,
             "tool_crop_boxes_list": tool_crop_boxes_list,
@@ -1593,6 +1650,125 @@ class AgentLoopManager:
             "clean_tool_bonus": float(clean_tool_bonus),
             "overuse_penalty": float(overuse_penalty),
             "bad_tool_penalty": float(bad_tool_penalty),
+            "r_total": float(r_total),
+            "detail": detail,
+            "total_tensor": total_tensor,
+        }
+
+    def _post_aggregate_mut_clean_tool_rewards(
+        self,
+        output: DataProto,
+        base: dict[str, Any],
+        meta: dict[str, Any],
+        params: dict[str, Any],
+        is_correct_list: list[bool],
+    ) -> None:
+        """MUT v1 reward using offline `mut_weight` labels from extra_info.
+
+        This intentionally does not recompute necessity online.  The training
+        parquet already encodes the offline MUT decision as mut_weight:
+        mut=0.5, weak=0.2, regular=0.0.
+        """
+        new_scores = base["base_scores"].clone()
+        r_acc_list: list[float] = [0.0] * base["bsz"]
+        fmt_reward_list: list[float] = [0.0] * base["bsz"]
+        r_protocol_list: list[float] = [0.0] * base["bsz"]
+        r_mut_list: list[float] = [0.0] * base["bsz"]
+        mut_weight_list: list[float] = [0.0] * base["bsz"]
+        turn_overuse_penalty_list: list[float] = [0.0] * base["bsz"]
+        regular_tool_penalty_list: list[float] = [0.0] * base["bsz"]
+        r_total_list: list[float] = [0.0] * base["bsz"]
+        details: list[str] = [""] * base["bsz"]
+
+        for i in range(base["bsz"]):
+            components = self._compute_mut_clean_tool_reward_for_sample(
+                idx=i,
+                base=base,
+                meta=meta,
+                params=params,
+                is_correct=is_correct_list[i],
+                format_reward=self._format_reward_value(output, i),
+            )
+            new_scores[i] = components["total_tensor"]
+            r_acc_list[i] = components["r_acc"]
+            fmt_reward_list[i] = components["fmt_reward"]
+            r_protocol_list[i] = components["r_protocol"]
+            r_mut_list[i] = components["r_mut"]
+            mut_weight_list[i] = components["mut_weight"]
+            turn_overuse_penalty_list[i] = components["turn_overuse_penalty"]
+            regular_tool_penalty_list[i] = components["regular_tool_penalty"]
+            r_total_list[i] = components["r_total"]
+            details[i] = components["detail"]
+            print(details[i])
+
+        self._write_tool_reward_outputs(
+            output=output,
+            new_scores=new_scores,
+            response_lengths=base["response_lengths"],
+            details=details,
+            components={
+                "R_acc": r_acc_list,
+                "R_fmt": fmt_reward_list,
+                "R_protocol": r_protocol_list,
+                "R_mut": r_mut_list,
+                "MutWeight": mut_weight_list,
+                "P_turn_overuse": turn_overuse_penalty_list,
+                "P_regular_tool": regular_tool_penalty_list,
+                "R_total": r_total_list,
+                "NumTurns": meta["code_count_list"],
+            },
+        )
+
+    def _compute_mut_clean_tool_reward_for_sample(
+        self,
+        idx: int,
+        base: dict[str, Any],
+        meta: dict[str, Any],
+        params: dict[str, Any],
+        is_correct: bool,
+        format_reward: float,
+    ) -> dict[str, Any]:
+        r_acc = 1.0 if is_correct else 0.0
+        used_tool = bool(meta["used_any_tool_list"][idx])
+        code_count = meta["code_count_list"][idx]
+        mut_weight = max(0.0, float(meta["mut_weight_list"][idx]))
+        regular_tool_penalty_weight = max(0.0, float(meta["regular_tool_penalty_list"][idx]))
+
+        has_tool_error = float(meta["tool_exec_error_count_list"][idx]) > 0.0
+        has_invalid_call = float(meta["invalid_tool_call_list"][idx]) > 0.0
+        tool_json_legal = not has_invalid_call
+
+        r_protocol = float(format_reward) * float(tool_json_legal)
+        r_mut = 1.0 if (is_correct and used_tool and not has_tool_error) else 0.0
+        regular_tool_penalty = regular_tool_penalty_weight if used_tool else 0.0
+        turn_overuse = max(0.0, float(code_count) - float(params["mut_turn_penalty_threshold"]))
+        turn_overuse_penalty = params["mut_turn_penalty_weight"] * turn_overuse
+
+        r_total = (
+            r_acc
+            + params["mut_protocol_weight"] * r_protocol
+            + mut_weight * r_mut
+            - regular_tool_penalty
+            - turn_overuse_penalty
+        )
+
+        total_tensor = torch.tensor(r_total, dtype=base["base_scores"].dtype, device=base["base_scores"].device)
+        detail = (
+            f"R_acc: {r_acc}, R_fmt: {format_reward}, R_protocol: {r_protocol}, "
+            f"R_mut: {r_mut}, MutWeight: {mut_weight}, "
+            f"TrainGroup: {meta['train_group_list'][idx]}, MUTBucket: {meta['mut_v1_bucket_list'][idx]}, "
+            f"UsedTool: {used_tool}, ToolJsonLegal: {tool_json_legal}, ToolExecError: {has_tool_error}, "
+            f"NumTurns: {code_count}, P_regular_tool: {regular_tool_penalty}, "
+            f"P_turn_overuse: {turn_overuse_penalty}, R_total: {r_total}."
+        )
+        return {
+            "r_acc": float(r_acc),
+            "fmt_reward": float(format_reward),
+            "r_protocol": float(r_protocol),
+            "r_mut": float(r_mut),
+            "mut_weight": float(mut_weight),
+            "regular_tool_penalty": float(regular_tool_penalty),
+            "turn_overuse_penalty": float(turn_overuse_penalty),
             "r_total": float(r_total),
             "detail": detail,
             "total_tensor": total_tensor,

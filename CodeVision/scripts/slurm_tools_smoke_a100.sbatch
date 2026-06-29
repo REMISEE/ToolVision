@@ -25,7 +25,7 @@ OCR_ENV="${OCR_ENV:-paddleocr}"
 GROUNDEDSAM2_ENV="${GROUNDEDSAM2_ENV:-groundedsam2}"
 DEPTH_ENV="${DEPTH_ENV:-depth-pro}"
 COUNTGD_ENV="${COUNTGD_ENV:-countgd}"
-CODEVISION_ENV="${CODEVISION_ENV:-codevision}"
+CODEVISION_ENV="${CODEVISION_ENV:-codevision_new}"
 
 mkdir -p "${RUN_DIR}" "${SERVICE_LOG_DIR}" "${SERVICE_PID_DIR}" "${OCR_DEMO_OUT_DIR}" "${TOOL_DEMO_OUT_DIR}"
 

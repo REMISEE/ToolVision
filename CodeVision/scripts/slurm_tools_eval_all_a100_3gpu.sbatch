@@ -17,7 +17,7 @@ SERVICE_LOG_DIR="${RUN_DIR}/service_logs"
 SERVICE_PID_DIR="${RUN_DIR}/service_pids"
 RAY_TMPDIR="${RAY_TMPDIR:-/tmp/tv_ray_3gpu}"
 
-CODEVISION_ENV="${CODEVISION_ENV:-codevision}"
+CODEVISION_ENV="${CODEVISION_ENV:-codevision_new}"
 
 BENCHMARK_ROOT="${BENCHMARK_ROOT:-${WORKSPACE_ROOT}/Benchmarks}"
 VSTAR_PARQUET_DEFAULT="${BENCHMARK_ROOT}/vstar-bench/vstar_codevision_eval.parquet"

@@ -1,0 +1,5 @@
+include: tv_pass16_template.yaml
+task: tv_arxivqa_holdout2000
+dataset_kwargs:
+  data_files:
+    test: /mnt/cpfs/delinmao/data/toolvision_arxivqa_holdout_lmms/inputs/arxivqa_holdout2000_real.jsonl

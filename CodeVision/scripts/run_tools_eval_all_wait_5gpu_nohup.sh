@@ -13,7 +13,7 @@ set -euo pipefail
 
 WORKSPACE_ROOT="${WORKSPACE_ROOT:-/mnt/cpfs/delinmao}"
 ROOT_DIR="${ROOT_DIR:-${WORKSPACE_ROOT}/ToolVision/CodeVision}"
-CODEVISION_ENV="${CODEVISION_ENV:-codevision}"
+CODEVISION_ENV="${CODEVISION_ENV:-${WORKSPACE_ROOT}/envs/codevision_new}"
 BENCHMARK_ROOT="${BENCHMARK_ROOT:-${WORKSPACE_ROOT}/Benchmarks}"
 
 MODEL_PATH="${MODEL_PATH:-${WORKSPACE_ROOT}/CodeVision/LLaMA-Factory/saves/qwen3vl-8b/sft-drop-simple-notool}"
@@ -51,6 +51,17 @@ PIXMO_COUNT_LMMS_PARQUET_DEFAULT="${BENCHMARK_ROOT}/Pixmo-Count-LMMS/pixmo_count
 OCRBENCH_V2_PARQUET_DEFAULT="${BENCHMARK_ROOT}/OCRBench_v2/ocrbench_v2_codevision_eval.parquet"
 SPATIALMQA_PARQUET_DEFAULT="${BENCHMARK_ROOT}/SpatialMQA/spatialmqa_codevision_eval.parquet"
 COUNTQA_PARQUET_DEFAULT="${BENCHMARK_ROOT}/CountQA/countqa_codevision_eval.parquet"
+DOCVQA_PARQUET_DEFAULT="${BENCHMARK_ROOT}/DocVQA/docvqa_val_codevision_eval.parquet"
+DOCVQA_TEST_PARQUET_DEFAULT="${BENCHMARK_ROOT}/DocVQA/docvqa_test_codevision_eval.parquet"
+INFOVQA_PARQUET_DEFAULT="${BENCHMARK_ROOT}/InfoVQA/infovqa_val_codevision_eval.parquet"
+INFOVQA_TEST_PARQUET_DEFAULT="${BENCHMARK_ROOT}/InfoVQA/infovqa_test_codevision_eval.parquet"
+MME_REALWORLD_PARQUET_DEFAULT="${BENCHMARK_ROOT}/MME-RealWorld/mme_realworld_codevision_eval.parquet"
+MME_REALWORLD_LITE_PARQUET_DEFAULT="${BENCHMARK_ROOT}/MME-RealWorld-Lite/mme_realworld_lite_codevision_eval.parquet"
+MME_REALWORLD_CN_PARQUET_DEFAULT="${BENCHMARK_ROOT}/MME-RealWorld-CN/mme_realworld_cn_codevision_eval.parquet"
+REALWORLDQA_PARQUET_DEFAULT="${BENCHMARK_ROOT}/RealWorldQA/realworldqa_codevision_eval.parquet"
+MMSTAR_PARQUET_DEFAULT="${BENCHMARK_ROOT}/MMStar/mmstar_codevision_eval.parquet"
+MMVET_PARQUET_DEFAULT="${BENCHMARK_ROOT}/MMVet/mmvet_codevision_eval.parquet"
+MMVET_HARD_PARQUET_DEFAULT="${BENCHMARK_ROOT}/MMVet-Hard/mmvet_hard_codevision_eval.parquet"
 
 mkdir -p "${RUN_DIR}" "${SERVICE_LOG_DIR}" "${SERVICE_PID_DIR}" "${RAY_TMPDIR}"
 if ! mkdir "${LOCK_DIR}" 2>/dev/null; then
@@ -234,6 +245,50 @@ run_one() {
     countqa)
       parquet="${COUNTQA_PARQUET:-${COUNTQA_PARQUET_DEFAULT}}"
       exp_name="${EXP_PREFIX}_countqa"
+      ;;
+    docvqa|docvqa_val)
+      parquet="${DOCVQA_PARQUET:-${DOCVQA_PARQUET_DEFAULT}}"
+      exp_name="${EXP_PREFIX}_docvqa_val"
+      ;;
+    docvqa_test)
+      parquet="${DOCVQA_TEST_PARQUET:-${DOCVQA_TEST_PARQUET_DEFAULT}}"
+      exp_name="${EXP_PREFIX}_docvqa_test"
+      ;;
+    infovqa|infovqa_val)
+      parquet="${INFOVQA_PARQUET:-${INFOVQA_PARQUET_DEFAULT}}"
+      exp_name="${EXP_PREFIX}_infovqa_val"
+      ;;
+    infovqa_test)
+      parquet="${INFOVQA_TEST_PARQUET:-${INFOVQA_TEST_PARQUET_DEFAULT}}"
+      exp_name="${EXP_PREFIX}_infovqa_test"
+      ;;
+    mme_realworld|mmerealworld)
+      parquet="${MME_REALWORLD_PARQUET:-${MME_REALWORLD_PARQUET_DEFAULT}}"
+      exp_name="${EXP_PREFIX}_mme_realworld"
+      ;;
+    mme_realworld_lite|mmerealworld_lite)
+      parquet="${MME_REALWORLD_LITE_PARQUET:-${MME_REALWORLD_LITE_PARQUET_DEFAULT}}"
+      exp_name="${EXP_PREFIX}_mme_realworld_lite"
+      ;;
+    mme_realworld_cn|mmerealworld_cn)
+      parquet="${MME_REALWORLD_CN_PARQUET:-${MME_REALWORLD_CN_PARQUET_DEFAULT}}"
+      exp_name="${EXP_PREFIX}_mme_realworld_cn"
+      ;;
+    realworldqa)
+      parquet="${REALWORLDQA_PARQUET:-${REALWORLDQA_PARQUET_DEFAULT}}"
+      exp_name="${EXP_PREFIX}_realworldqa"
+      ;;
+    mmstar)
+      parquet="${MMSTAR_PARQUET:-${MMSTAR_PARQUET_DEFAULT}}"
+      exp_name="${EXP_PREFIX}_mmstar"
+      ;;
+    mmvet)
+      parquet="${MMVET_PARQUET:-${MMVET_PARQUET_DEFAULT}}"
+      exp_name="${EXP_PREFIX}_mmvet"
+      ;;
+    mmvet_hard)
+      parquet="${MMVET_HARD_PARQUET:-${MMVET_HARD_PARQUET_DEFAULT}}"
+      exp_name="${EXP_PREFIX}_mmvet_hard"
       ;;
     *)
       echo "Unknown benchmark: ${bench}" >&2

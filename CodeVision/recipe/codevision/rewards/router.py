@@ -1,6 +1,6 @@
 from typing import Any, Callable
 
-from .common import answer_candidates, as_list, extract_answer, tool_usage_info
+from .common import answer_candidates, choice_options_from_extra_info, extract_answer, tool_usage_info
 from .judge import judge_score, should_use_judge
 from .rule_scorers import (
     bbox_iou_score,
@@ -155,6 +155,16 @@ def compute_toolvision_score(
         "reward_family": family,
         "source_dataset": str(extra_info.get("source_dataset") or data_source or ""),
     }
+    for key in (
+        "mut_weight",
+        "regular_tool_penalty",
+        "train_group",
+        "mut_v1_bucket",
+        "mut_v1_BC",
+        "mut_v2_class",
+    ):
+        if key in extra_info:
+            result[key] = extra_info[key]
     result.update(tool_usage_info(solution_str))
     return result
 
@@ -197,7 +207,7 @@ def _reward_family(data_source: str, extra_info: dict[str, Any]) -> str | None:
 
 
 def _score_by_family(family: str, prediction: Any, ground_truth: Any, extra_info: dict[str, Any]) -> float:
-    options = as_list(extra_info.get("options") if extra_info.get("options") is not None else extra_info.get("choices"))
+    options = choice_options_from_extra_info(extra_info)
     scorers: dict[str, ScoreFn] = {
         "exact": lambda pred, gt, _extra: exact_score(pred, gt, _extra),
         "short_text": lambda pred, gt, _extra: exact_score(pred, gt, _extra),

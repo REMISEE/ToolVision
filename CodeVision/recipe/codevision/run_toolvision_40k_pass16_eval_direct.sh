@@ -10,7 +10,7 @@ set -euo pipefail
 # the RL training launcher.
 
 PROJECT_DIR="${PROJECT_DIR:-/mnt/cpfs/delinmao/ToolVision/CodeVision}"
-PYTHON_BIN="${PYTHON_BIN:-/mnt/cpfs/delinmao/envs/codevision/bin/python3}"
+PYTHON_BIN="${PYTHON_BIN:-/mnt/cpfs/delinmao/envs/codevision_new/bin/python3}"
 
 MODEL_PATH="${MODEL_PATH:-/mnt/cpfs/delinmao/models/Qwen3-VL-8B-Instruct}"
 DATA_PARQUET="${DATA_PARQUET:-/mnt/cpfs/delinmao/data/toolvision_codevision_rl_40k_clean_no_extra_image/parquet/train.parquet}"
@@ -114,4 +114,3 @@ echo "VAL_METRICS_OUTPUT=${VAL_METRICS_OUTPUT}"
   +trainer.val_metrics_output="${VAL_METRICS_OUTPUT}" \
   +trainer.validation_data_dir="${VAL_DATA_DIR}" \
   ray_kwargs.ray_init.num_cpus="${RAY_INIT_NUM_CPUS}"
-

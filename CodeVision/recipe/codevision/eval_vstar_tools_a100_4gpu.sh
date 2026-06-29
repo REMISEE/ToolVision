@@ -38,6 +38,8 @@ BENCHMARK_ROOT="${BENCHMARK_ROOT:-${WORKSPACE_ROOT}/Benchmarks}"
 MODEL_PATH="${MODEL_PATH:-${WORKSPACE_ROOT}/outputs/qwen3vl_sft/full}"
 DEFAULT_EVAL_PARQUET="${BENCHMARK_ROOT}/vstar-bench/vstar_codevision_eval.parquet"
 EVAL_PARQUET="${EVAL_PARQUET:-${VSTAR_PARQUET:-${DEFAULT_EVAL_PARQUET}}}"
+RESUME_MODE="${RESUME_MODE:-auto}"
+RESUME_FROM_PATH="${RESUME_FROM_PATH:-null}"
 
 test_files="['${EVAL_PARQUET}']"
 train_files="${test_files}"
@@ -303,7 +305,8 @@ python3 -m verl.trainer.main_ppo \
     +trainer.log_train_freq=${log_train_freq} \
     trainer.total_epochs=${total_epochs} \
     trainer.default_local_dir=${SAVE_DIR} \
-    trainer.resume_mode=auto \
+    trainer.resume_mode=${RESUME_MODE} \
+    trainer.resume_from_path=${RESUME_FROM_PATH} \
     +trainer.only_test=${ONLY_TEST} \
     +trainer.validation_data_dir=${VAL_DATA_DIR:-null} \
     +trainer.diagnostics_dir=${DIAGNOSTICS_DIR:-null} \

@@ -179,6 +179,11 @@ def _load_existing_image(output_dir: Path, stem: str) -> tuple[Path, int, int] |
     return image_path.resolve(), width, height
 
 
+def _existing_image_path(output_dir: Path, stem: str) -> Path | None:
+    matches = sorted(output_dir.glob(f"{stem}.*"))
+    return matches[0].resolve() if matches else None
+
+
 def _save_image_url(url: str, output_dir: Path, stem: str, timeout: int) -> tuple[Path, int, int]:
     url = html.unescape(url)
     request = Request(
@@ -205,7 +210,9 @@ def _sanitize_question_text(question: str) -> str:
 
 
 def _build_prompt(question: str, width: int, height: int) -> str:
-    return f"<image>Image size = {width}x{height} pixels.\n\n{_sanitize_question_text(question)}"
+    if width > 0 and height > 0:
+        return f"<image>Image size = {width}x{height} pixels.\n\n{_sanitize_question_text(question)}"
+    return f"<image>\n\n{_sanitize_question_text(question)}"
 
 
 def _record(
@@ -297,6 +304,25 @@ def _hf_dataset_snapshot(repo_id: str) -> Path:
             cache_dir=_hf_cache_dir(),
         )
     )
+
+
+def _load_hf_dataset(repo_id: str, *, split: str, name: str | None = None):
+    import datasets
+
+    kwargs = {"split": split, "cache_dir": _hf_cache_dir()}
+    token_kwargs_options = []
+    if os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN"):
+        token_kwargs_options.extend([{"token": True}, {"use_auth_token": True}])
+    token_kwargs_options.append({})
+    for token_kwargs in token_kwargs_options:
+        try:
+            return datasets.load_dataset(repo_id, name, **kwargs, **token_kwargs)
+        except TypeError:
+            continue
+        except Exception as exc:
+            if token_kwargs and "Token is required" in str(exc):
+                continue
+            raise
 
 
 def _read_hf_parquets(repo_id: str, filenames: list[str]):
@@ -1118,18 +1144,510 @@ def convert_hrbench(root: Path) -> list[Path]:
     return outputs
 
 
+def _limit_dataset(dataset: Any, limit: int | None):
+    if limit is None:
+        return dataset
+    return dataset.select(range(min(int(limit), len(dataset))))
+
+
+def _mme_realworld_prompt(row: dict[str, Any], *, cn: bool) -> str:
+    question = str(row["question"]).strip()
+    choices = [str(choice) for choice in _as_plain_list(row.get("multi-choice options"))]
+    if cn:
+        return (
+            f"{question} 选项如下所示:\n"
+            + "\n".join(choices)
+            + "\n根据图像选择上述多项选择题的最佳答案。只需回答正确选项的字母（A, B, C, D 或 E）。\n最佳答案为："
+        )
+    return (
+        f"{question} The choices are listed below:\n"
+        + "\n".join(choices)
+        + "\nSelect the best answer to the above multiple-choice question based on the image. "
+        "Respond with only the letter (A, B, C, D, or E) of the correct option.\nThe best answer is:"
+    )
+
+
+def _convert_mme_realworld_variant(
+    root: Path,
+    *,
+    repo_id: str,
+    benchmark_name: str,
+    directory_name: str,
+    cn: bool = False,
+    inspect: bool = False,
+    limit: int | None = None,
+    inspect_limit: int = 3,
+) -> Path:
+    benchmark_dir = root / directory_name
+    output_path = benchmark_dir / f"{benchmark_name}_codevision_eval.parquet"
+    image_dir = benchmark_dir / "codevision_images"
+    dataset = _limit_dataset(_load_hf_dataset(repo_id, split="train"), limit)
+    records = []
+    raw_examples = []
+    converted_examples = []
+    for idx, row in enumerate(dataset):
+        row = dict(row)
+        if idx < inspect_limit:
+            raw_examples.append(row)
+        image_path, width, height = _save_image(row["bytes"], image_dir, f"{benchmark_name}_train_{idx:05d}")
+        options = [str(choice) for choice in _as_plain_list(row.get("multi-choice options"))]
+        category = str(row.get("category") or "")
+        task_category = str(row.get("l2-category") or "")
+        high_level = "perception" if "perception" in category.lower() else "reasoning"
+        record = _record(
+            data_source=f"{benchmark_name}_{_sanitize(high_level)}",
+            question=_mme_realworld_prompt(row, cn=cn),
+            answer=row["answer"],
+            image_path=image_path,
+            width=width,
+            height=height,
+            index=idx,
+            source_benchmark=benchmark_name,
+            extra={
+                "dataset_path": repo_id,
+                "source_split": "train",
+                "eval_protocol": "lmms_eval_aligned_sample_accuracy",
+                "scorer_status": "implemented",
+                "mme_realworld_index": row.get("index", idx),
+                "category": category,
+                "sub_category": category.split("/")[-1] if category else "",
+                "task_category": task_category,
+                "options": options,
+                "raw_answer": row.get("answer"),
+                "aggregation_note": "Official lmms-eval aggregation is sample-weighted overall accuracy after A-E extraction.",
+            },
+        )
+        records.append(record)
+        if len(converted_examples) < inspect_limit:
+            converted_examples.append(record)
+    if inspect:
+        _print_inspect(
+            dataset_name=repo_id,
+            splits=["train"],
+            raw_count=len(dataset),
+            converted_count=len(records),
+            raw_examples=raw_examples,
+            converted_examples=converted_examples,
+        )
+        return output_path
+    _write_parquet(records, output_path)
+    return output_path
+
+
+def convert_mme_realworld(root: Path, *, inspect: bool = False, limit: int | None = None, inspect_limit: int = 3) -> Path:
+    return _convert_mme_realworld_variant(
+        root,
+        repo_id="yifanzhang114/MME-RealWorld-Lmms-eval",
+        benchmark_name="mme_realworld",
+        directory_name="MME-RealWorld",
+        inspect=inspect,
+        limit=limit,
+        inspect_limit=inspect_limit,
+    )
+
+
+def convert_mme_realworld_lite(root: Path, *, inspect: bool = False, limit: int | None = None, inspect_limit: int = 3) -> Path:
+    return _convert_mme_realworld_variant(
+        root,
+        repo_id="yifanzhang114/MME-RealWorld-lite-lmms-eval",
+        benchmark_name="mme_realworld_lite",
+        directory_name="MME-RealWorld-Lite",
+        inspect=inspect,
+        limit=limit,
+        inspect_limit=inspect_limit,
+    )
+
+
+def convert_mme_realworld_cn(root: Path, *, inspect: bool = False, limit: int | None = None, inspect_limit: int = 3) -> Path:
+    return _convert_mme_realworld_variant(
+        root,
+        repo_id="yifanzhang114/MME-RealWorld-CN-Lmms-eval",
+        benchmark_name="mme_realworld_cn",
+        directory_name="MME-RealWorld-CN",
+        cn=True,
+        inspect=inspect,
+        limit=limit,
+        inspect_limit=inspect_limit,
+    )
+
+
+def convert_realworldqa(root: Path, *, inspect: bool = False, limit: int | None = None, inspect_limit: int = 3) -> Path:
+    benchmark_dir = root / "RealWorldQA"
+    output_path = benchmark_dir / "realworldqa_codevision_eval.parquet"
+    image_dir = benchmark_dir / "codevision_images"
+    dataset = _limit_dataset(_load_hf_dataset("lmms-lab/RealWorldQA", split="test"), limit)
+    records = []
+    raw_examples = []
+    converted_examples = []
+    for idx, row in enumerate(dataset):
+        row = dict(row)
+        if idx < inspect_limit:
+            raw_examples.append(row)
+        image_path, width, height = _save_image(row["image"], image_dir, f"realworldqa_test_{idx:05d}")
+        record = _record(
+            data_source="realworldqa",
+            question=str(row["question"]).strip(),
+            answer=row["answer"],
+            image_path=image_path,
+            width=width,
+            height=height,
+            index=idx,
+            source_benchmark="realworldqa",
+            extra={
+                "dataset_path": "lmms-lab/RealWorldQA",
+                "source_split": "test",
+                "eval_protocol": "lmms_eval_exact_match",
+                "scorer_status": "implemented",
+                "raw_answer": row.get("answer"),
+            },
+        )
+        records.append(record)
+        if len(converted_examples) < inspect_limit:
+            converted_examples.append(record)
+    if inspect:
+        _print_inspect(
+            dataset_name="lmms-lab/RealWorldQA",
+            splits=["test"],
+            raw_count=len(dataset),
+            converted_count=len(records),
+            raw_examples=raw_examples,
+            converted_examples=converted_examples,
+        )
+        return output_path
+    _write_parquet(records, output_path)
+    return output_path
+
+
+def convert_mmstar(root: Path, *, inspect: bool = False, limit: int | None = None, inspect_limit: int = 3) -> Path:
+    benchmark_dir = root / "MMStar"
+    output_path = benchmark_dir / "mmstar_codevision_eval.parquet"
+    image_dir = benchmark_dir / "codevision_images"
+    dataset = _limit_dataset(_load_hf_dataset("Lin-Chen/MMStar", split="val"), limit)
+    records = []
+    raw_examples = []
+    converted_examples = []
+    for idx, row in enumerate(dataset):
+        row = dict(row)
+        if idx < inspect_limit:
+            raw_examples.append(row)
+        image_path, width, height = _save_image(row["image"], image_dir, f"mmstar_val_{idx:05d}")
+        question = str(row["question"]).strip()
+        if "answer with" not in question.lower():
+            question = f"{question}\nAnswer with the option's letter from the given choices directly."
+        l2_category = str(row.get("l2_category") or "unknown")
+        record = _record(
+            data_source=f"mmstar_{_sanitize(l2_category)}",
+            question=question,
+            answer=row["answer"],
+            image_path=image_path,
+            width=width,
+            height=height,
+            index=idx,
+            source_benchmark="mmstar",
+            extra={
+                "dataset_path": "Lin-Chen/MMStar",
+                "source_split": "val",
+                "eval_protocol": "lmms_eval_l2_macro",
+                "scorer_status": "implemented",
+                "category": str(row.get("category") or ""),
+                "l2_category": l2_category,
+                "raw_answer": row.get("answer"),
+                "aggregation_note": "Official lmms-eval aggregate is macro average over l2_category.",
+            },
+        )
+        records.append(record)
+        if len(converted_examples) < inspect_limit:
+            converted_examples.append(record)
+    if inspect:
+        _print_inspect(
+            dataset_name="Lin-Chen/MMStar",
+            splits=["val"],
+            raw_count=len(dataset),
+            converted_count=len(records),
+            raw_examples=raw_examples,
+            converted_examples=converted_examples,
+        )
+        return output_path
+    _write_parquet(records, output_path)
+    return output_path
+
+
+def _convert_docvqa_family(
+    root: Path,
+    *,
+    dataset_name: str,
+    benchmark_name: str,
+    directory_name: str,
+    split: str = "validation",
+    inspect: bool = False,
+    limit: int | None = None,
+    inspect_limit: int = 3,
+) -> Path:
+    benchmark_dir = root / directory_name
+    split_label = "val" if split == "validation" else _sanitize(split)
+    output_path = benchmark_dir / f"{benchmark_name}_{split_label}_codevision_eval.parquet"
+    image_dir = benchmark_dir / "codevision_images"
+    dataset = _load_hf_dataset("lmms-lab/DocVQA", name=dataset_name, split=split)
+    try:
+        from datasets import Image as HFImage
+
+        dataset = dataset.cast_column("image", HFImage(decode=False))
+    except Exception:
+        pass
+    dataset = _limit_dataset(dataset, limit)
+    records = []
+    raw_examples = []
+    converted_examples = []
+    for idx, row in enumerate(dataset):
+        row = dict(row)
+        if idx < inspect_limit:
+            raw_examples.append(row)
+        image_stem = f"{benchmark_name}_{split}_{idx:05d}"
+        existing_image_path = _existing_image_path(image_dir, image_stem)
+        if existing_image_path is not None:
+            image_path = existing_image_path
+            width, height = 0, 0
+        else:
+            image_path, width, height = _save_image(row["image"], image_dir, image_stem)
+        answers = _as_plain_list(row.get("answers"))
+        has_public_answers = bool(answers)
+        question = f"{str(row['question']).strip()}\nAnswer the question using a single word or phrase."
+        record = _record(
+            data_source=benchmark_name if split == "validation" else f"{benchmark_name}_{split_label}",
+            question=question,
+            answer=answers,
+            image_path=image_path,
+            width=width,
+            height=height,
+            index=idx,
+            source_benchmark=benchmark_name,
+            extra={
+                "dataset_path": "lmms-lab/DocVQA",
+                "dataset_name": dataset_name,
+                "source_split": split,
+                "eval_protocol": "ANLS",
+                "scorer_status": "implemented" if has_public_answers else "hidden_labels_submission_only",
+                "has_public_answers": has_public_answers,
+                "questionId": row.get("questionId"),
+                "answers": answers,
+            },
+        )
+        records.append(record)
+        if len(converted_examples) < inspect_limit:
+            converted_examples.append(record)
+    if inspect:
+        _print_inspect(
+            dataset_name=f"lmms-lab/DocVQA/{dataset_name}",
+            splits=[split],
+            raw_count=len(dataset),
+            converted_count=len(records),
+            raw_examples=raw_examples,
+            converted_examples=converted_examples,
+        )
+        return output_path
+    _write_parquet(records, output_path)
+    return output_path
+
+
+def convert_docvqa_val(root: Path, *, inspect: bool = False, limit: int | None = None, inspect_limit: int = 3) -> Path:
+    return _convert_docvqa_family(
+        root,
+        dataset_name="DocVQA",
+        benchmark_name="docvqa",
+        directory_name="DocVQA",
+        inspect=inspect,
+        limit=limit,
+        inspect_limit=inspect_limit,
+    )
+
+
+def convert_docvqa_test(root: Path, *, inspect: bool = False, limit: int | None = None, inspect_limit: int = 3) -> Path:
+    return _convert_docvqa_family(
+        root,
+        dataset_name="DocVQA",
+        benchmark_name="docvqa",
+        directory_name="DocVQA",
+        split="test",
+        inspect=inspect,
+        limit=limit,
+        inspect_limit=inspect_limit,
+    )
+
+
+def convert_infovqa_val(root: Path, *, inspect: bool = False, limit: int | None = None, inspect_limit: int = 3) -> Path:
+    return _convert_docvqa_family(
+        root,
+        dataset_name="InfographicVQA",
+        benchmark_name="infovqa",
+        directory_name="InfoVQA",
+        inspect=inspect,
+        limit=limit,
+        inspect_limit=inspect_limit,
+    )
+
+
+def convert_infovqa_test(root: Path, *, inspect: bool = False, limit: int | None = None, inspect_limit: int = 3) -> Path:
+    return _convert_docvqa_family(
+        root,
+        dataset_name="InfographicVQA",
+        benchmark_name="infovqa",
+        directory_name="InfoVQA",
+        split="test",
+        inspect=inspect,
+        limit=limit,
+        inspect_limit=inspect_limit,
+    )
+
+
+def convert_mmvet(root: Path, *, inspect: bool = False, limit: int | None = None, inspect_limit: int = 3) -> Path:
+    benchmark_dir = root / "MMVet"
+    output_path = benchmark_dir / "mmvet_codevision_eval.parquet"
+    image_dir = benchmark_dir / "codevision_images"
+    dataset = _limit_dataset(_load_hf_dataset("lmms-lab/MMVet", split="test"), limit)
+    records = []
+    raw_examples = []
+    converted_examples = []
+    for idx, row in enumerate(dataset):
+        row = dict(row)
+        if idx < inspect_limit:
+            raw_examples.append(row)
+        image_path, width, height = _save_image(row["image"], image_dir, f"mmvet_test_{idx:05d}")
+        question = (
+            "First please perform reasoning, and think step by step to provide best answer to the following question:\n\n"
+            f"{str(row['question']).strip()}"
+        )
+        record = _record(
+            data_source="mmvet",
+            question=question,
+            answer=row["answer"],
+            image_path=image_path,
+            width=width,
+            height=height,
+            index=idx,
+            source_benchmark="mmvet",
+            extra={
+                "dataset_path": "lmms-lab/MMVet",
+                "source_split": "test",
+                "eval_protocol": "llm_judge_score",
+                "scorer_status": "llm_judge_required",
+                "question_id": row.get("question_id", row.get("id", idx)),
+                "capability": row.get("capability", ""),
+                "answers": [row.get("answer", "")],
+            },
+        )
+        records.append(record)
+        if len(converted_examples) < inspect_limit:
+            converted_examples.append(record)
+    if inspect:
+        _print_inspect(
+            dataset_name="lmms-lab/MMVet",
+            splits=["test"],
+            raw_count=len(dataset),
+            converted_count=len(records),
+            raw_examples=raw_examples,
+            converted_examples=converted_examples,
+        )
+        return output_path
+    _write_parquet(records, output_path)
+    return output_path
+
+
+def convert_mmvet_hard(root: Path, *, inspect: bool = False, limit: int | None = None, inspect_limit: int = 3) -> Path:
+    data_path = os.getenv("MMVET_HARD_DATA_PATH", "").strip()
+    if not data_path:
+        raise FileNotFoundError(
+            "MMVet-Hard has no standard local lmms-eval task in this checkout. "
+            "Set MMVET_HARD_DATA_PATH to a json/jsonl/parquet file with image/question/answer fields."
+        )
+    import pandas as pd
+
+    path = Path(data_path)
+    if path.suffix.lower() == ".jsonl":
+        with path.open("r", encoding="utf-8") as handle:
+            rows = [json.loads(line) for line in handle if line.strip()]
+    elif path.suffix.lower() == ".json":
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        rows = payload if isinstance(payload, list) else list(payload.values())
+    else:
+        rows = pd.read_parquet(path).to_dict(orient="records")
+    if limit is not None:
+        rows = rows[: int(limit)]
+
+    benchmark_dir = root / "MMVet-Hard"
+    output_path = benchmark_dir / "mmvet_hard_codevision_eval.parquet"
+    image_dir = benchmark_dir / "codevision_images"
+    records = []
+    converted_examples = []
+    for idx, row in enumerate(rows):
+        image_value = row.get("image", row.get("image_path", row.get("image_file")))
+        if isinstance(image_value, str) and not Path(image_value).exists() and row.get("image_root"):
+            image_value = str(Path(row["image_root"]) / image_value)
+        image_path, width, height = _save_image(image_value, image_dir, f"mmvet_hard_{idx:05d}")
+        question = (
+            "First please perform reasoning, and think step by step to provide best answer to the following question:\n\n"
+            f"{str(row['question']).strip()}"
+        )
+        record = _record(
+            data_source="mmvet_hard",
+            question=question,
+            answer=row.get("answer", row.get("ground_truth", "")),
+            image_path=image_path,
+            width=width,
+            height=height,
+            index=idx,
+            source_benchmark="mmvet_hard",
+            extra={
+                "dataset_path": str(path),
+                "source_split": str(row.get("split", "test")),
+                "eval_protocol": "llm_judge_score",
+                "scorer_status": "llm_judge_required",
+                "question_id": row.get("question_id", row.get("id", idx)),
+                "capability": row.get("capability", row.get("capabilities", "")),
+                "answers": [row.get("answer", row.get("ground_truth", ""))],
+            },
+        )
+        records.append(record)
+        if len(converted_examples) < inspect_limit:
+            converted_examples.append(record)
+    if inspect:
+        _print_inspect(
+            dataset_name="MMVet-Hard local",
+            splits=["custom"],
+            raw_count=len(rows),
+            converted_count=len(records),
+            raw_examples=rows[:inspect_limit],
+            converted_examples=converted_examples,
+        )
+        return output_path
+    _write_parquet(records, output_path)
+    return output_path
+
+
 CONVERTERS = {
     "chartqa": convert_chartqa,
     "countqa": convert_countqa,
+    "docvqa": convert_docvqa_val,
+    "docvqa_val": convert_docvqa_val,
+    "docvqa_test": convert_docvqa_test,
     "ocrbench": convert_ocrbench,
     "ocrbench_v2": convert_ocrbench_v2,
     "countbench": convert_countbench,
     "cvbench": convert_cvbench,
     "fsc147": convert_fsc147,
     "hrbench": convert_hrbench,
+    "infovqa": convert_infovqa_val,
+    "infovqa_val": convert_infovqa_val,
+    "infovqa_test": convert_infovqa_test,
+    "mme_realworld": convert_mme_realworld,
+    "mme_realworld_cn": convert_mme_realworld_cn,
+    "mme_realworld_lite": convert_mme_realworld_lite,
+    "mmstar": convert_mmstar,
+    "mmvet": convert_mmvet,
+    "mmvet_hard": convert_mmvet_hard,
     "mvtoolbench": convert_mvtoolbench,
     "pixmo_count": convert_pixmo_count,
     "pixmo_count_lmms": convert_pixmo_count_lmms,
+    "realworldqa": convert_realworldqa,
     "spatialmqa": convert_spatialmqa,
 }
 
@@ -1234,6 +1752,27 @@ def main() -> None:
             )
         elif dataset == "mvtoolbench":
             convert_mvtoolbench(
+                args.benchmark_root,
+                inspect=args.inspect,
+                limit=args.limit,
+                inspect_limit=args.inspect_limit,
+            )
+        elif dataset in {
+            "docvqa",
+            "docvqa_val",
+            "docvqa_test",
+            "infovqa",
+            "infovqa_val",
+            "infovqa_test",
+            "mme_realworld",
+            "mme_realworld_cn",
+            "mme_realworld_lite",
+            "mmstar",
+            "mmvet",
+            "mmvet_hard",
+            "realworldqa",
+        }:
+            CONVERTERS[dataset](
                 args.benchmark_root,
                 inspect=args.inspect,
                 limit=args.limit,
