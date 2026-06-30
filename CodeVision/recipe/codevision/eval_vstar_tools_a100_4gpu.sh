@@ -64,8 +64,8 @@ GROUNDEDSAM2_BASE_URL="${GROUNDEDSAM2_BASE_URL:-http://127.0.0.1:8081}"
 DEPTH_BASE_URL="${DEPTH_BASE_URL:-http://127.0.0.1:8082}"
 COUNTGD_BASE_URL="${COUNTGD_BASE_URL:-http://127.0.0.1:8083}"
 
-train_bsz=64
-train_mini_bsz=32
+train_bsz="${TRAIN_BSZ:-64}"
+train_mini_bsz="${TRAIN_MINI_BSZ:-32}"
 train_micro_bsz_per_gpu=1
 infer_micro_bsz_per_gpu=1
 
@@ -78,8 +78,8 @@ VAL_TOP_P="${VAL_TOP_P:-1.0}"
 VAL_DO_SAMPLE="${VAL_DO_SAMPLE:-False}"
 ROLLOUT_MAX_TOKENS_PER_TURN="${ROLLOUT_MAX_TOKENS_PER_TURN:-2048}"
 
-max_prompt_len=$((1024 * 16))
-max_resp_len=$((1024 * 16))
+max_prompt_len="${MAX_PROMPT_LEN:-$((1024 * 16))}"
+max_resp_len="${MAX_RESP_LEN:-$((1024 * 16))}"
 max_tool_resp_len=$((1024 * 10))
 max_image_resolution=$((1024 * 8 * 28 * 28))
 
@@ -121,6 +121,7 @@ ONLY_TEST=True
 mkdir -p "${SAVE_DIR}"
 VAL_METRICS_OUTPUT="${SAVE_DIR}/metrics.json"
 RUNTIME_TOOL_CFG_PATH="${SAVE_DIR}/tool_config.runtime.yaml"
+DISABLE_TOOLS="${DISABLE_TOOLS:-0}"
 SAVE_VAL_GENERATIONS="${SAVE_VAL_GENERATIONS:-0}"
 if [[ "${SAVE_VAL_GENERATIONS}" == "1" || "${SAVE_VAL_GENERATIONS,,}" == "true" || "${SAVE_VAL_GENERATIONS,,}" == "yes" ]]; then
   VAL_DATA_DIR="${VAL_DATA_DIR:-${SAVE_DIR}/generations}"
@@ -138,13 +139,16 @@ DIAGNOSTIC_SAMPLE_SEED="${DIAGNOSTIC_SAMPLE_SEED:-42}"
 SAVE_FULL_TRAJECTORY_ALL="${SAVE_FULL_TRAJECTORY_ALL:-0}"
 STREAM_VALIDATION_DUMP="${STREAM_VALIDATION_DUMP:-True}"
 
-python3 - <<'PY' \
-  "${tool_cfg_path}" \
-  "${RUNTIME_TOOL_CFG_PATH}" \
-  "${OCR_BASE_URL}" \
-  "${GROUNDEDSAM2_BASE_URL}" \
-  "${DEPTH_BASE_URL}" \
-  "${COUNTGD_BASE_URL}"
+if [[ "${DISABLE_TOOLS}" == "1" || "${DISABLE_TOOLS,,}" == "true" || "${DISABLE_TOOLS,,}" == "yes" ]]; then
+  tool_cfg_path=null
+else
+  python3 - <<'PY' \
+    "${tool_cfg_path}" \
+    "${RUNTIME_TOOL_CFG_PATH}" \
+    "${OCR_BASE_URL}" \
+    "${GROUNDEDSAM2_BASE_URL}" \
+    "${DEPTH_BASE_URL}" \
+    "${COUNTGD_BASE_URL}"
 from pathlib import Path
 import sys
 import yaml
@@ -168,12 +172,15 @@ services["depth"]["base_url"] = depth_base_url
 services["countgd"]["base_url"] = countgd_base_url
 dst_path.write_text(yaml.safe_dump(config, sort_keys=False, allow_unicode=True), encoding="utf-8")
 PY
-tool_cfg_path="${RUNTIME_TOOL_CFG_PATH}"
+  tool_cfg_path="${RUNTIME_TOOL_CFG_PATH}"
+fi
 
 echo "MODEL_PATH=${MODEL_PATH}"
 echo "EVAL_PARQUET=${EVAL_PARQUET}"
 echo "NGPUS_PER_NODE=${NGPUS_PER_NODE}"
 echo "INFER_TP_SIZE=${INFER_TP_SIZE}"
+echo "TRAIN_BSZ=${train_bsz}"
+echo "TRAIN_MINI_BSZ=${train_mini_bsz}"
 echo "VAL_BSZ=${VAL_BSZ}"
 echo "N_RESP_PER_PROMPT=${N_RESP_PER_PROMPT}"
 echo "VAL_N_RESP_PER_PROMPT=${VAL_N_RESP_PER_PROMPT}"
@@ -182,6 +189,8 @@ echo "VAL_TEMPERATURE=${VAL_TEMPERATURE}"
 echo "VAL_TOP_P=${VAL_TOP_P}"
 echo "VAL_DO_SAMPLE=${VAL_DO_SAMPLE}"
 echo "ROLLOUT_MAX_TOKENS_PER_TURN=${ROLLOUT_MAX_TOKENS_PER_TURN}"
+echo "MAX_PROMPT_LEN=${max_prompt_len}"
+echo "MAX_RESP_LEN=${max_resp_len}"
 echo "GPU_MEMORY_UTILIZATION=${GPU_MEMORY_UTILIZATION}"
 echo "ROLLOUT_AGENT_NUM_WORKERS=${ROLLOUT_AGENT_NUM_WORKERS}"
 echo "MAX_NUM_SEQS=${MAX_NUM_SEQS}"
@@ -193,6 +202,7 @@ echo "GROUNDEDSAM2_BASE_URL=${GROUNDEDSAM2_BASE_URL}"
 echo "DEPTH_BASE_URL=${DEPTH_BASE_URL}"
 echo "COUNTGD_BASE_URL=${COUNTGD_BASE_URL}"
 echo "TOOL_CFG_PATH=${tool_cfg_path}"
+echo "DISABLE_TOOLS=${DISABLE_TOOLS}"
 echo "SYSTEM_PROMPT_PATH=${new_sp_path}"
 echo "SAVE_VAL_GENERATIONS=${SAVE_VAL_GENERATIONS}"
 echo "VAL_DATA_DIR=${VAL_DATA_DIR:-<disabled>}"
