@@ -13,6 +13,7 @@
 # limitations under the License.
 import asyncio
 import heapq
+import json
 import logging
 import os
 import queue
@@ -41,6 +42,43 @@ from verl.utils.fs import copy_to_local
 from verl.utils.model import compute_position_id_with_mask
 from verl.utils.rollout_trace import RolloutTraceConfig, rollout_trace_attr, rollout_trace_op
 from verl.workers.rollout.replica import TokenOutput, get_rollout_replica_class
+
+try:
+    from recipe.codevision.rewards.step_answerability import (
+        STEP_REWARD_VERSION,
+        compute_step_answerability_delta,
+        coerce_json_list,
+    )
+except Exception:  # pragma: no cover - optional outside CodeVision recipe
+    STEP_REWARD_VERSION = "step_answerability_delta_v1"
+
+    def coerce_json_list(value):
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return value
+        if isinstance(value, tuple):
+            return list(value)
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, list) else []
+            except Exception:
+                return []
+        return []
+
+    def compute_step_answerability_delta(scores, valid_steps=None, *, tau=0.1, cap=0.5):
+        return {
+            "v0": None,
+            "step_scores": [],
+            "step_gains": [],
+            "raw_delta": 0.0,
+            "capped_delta": 0.0,
+            "best_score": None,
+            "scored_count": 0,
+            "valid_count": 0,
+            "version": STEP_REWARD_VERSION,
+        }
 
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
@@ -1079,6 +1117,15 @@ class AgentLoopManager:
                 is_correct_list=is_correct_list,
             )
             return
+        if mode in {"mut_clean_step_v1", "mut_step_v1", "step_answerability_delta_v1"}:
+            self._post_aggregate_mut_clean_step_rewards(
+                output=output,
+                base=base,
+                meta=meta,
+                params=params,
+                is_correct_list=is_correct_list,
+            )
+            return
         if mode in {"simple_penalty", "acc_format_penalty"}:
             self._post_aggregate_simple_penalty_tool_rewards(
                 output=output,
@@ -1155,6 +1202,7 @@ class AgentLoopManager:
     def _build_tool_reward_params(self, tool_reward_cfg: dict[str, Any]) -> dict[str, Any]:
         allowed_spurious_ops = {"rotate_90", "rotate_180", "rotate_270", "flip_horizontal", "flip_vertical"}
         core_ops = allowed_spurious_ops | {"crop"}
+        step_reward_cfg = self.config.reward_model.get("step_reward", {})
         return {
             "alpha": float(tool_reward_cfg.get("alpha", 0.5)),
             "beta": float(tool_reward_cfg.get("beta", 0.2)),
@@ -1179,6 +1227,9 @@ class AgentLoopManager:
             "mut_protocol_weight": float(tool_reward_cfg.get("mut_protocol_weight", 0.2)),
             "mut_turn_penalty_weight": float(tool_reward_cfg.get("mut_turn_penalty_weight", 0.05)),
             "mut_turn_penalty_threshold": int(tool_reward_cfg.get("mut_turn_penalty_threshold", 6)),
+            "step_weight": float(step_reward_cfg.get("weight", os.getenv("STEP_REWARD_WEIGHT", 0.2))),
+            "step_tau": float(step_reward_cfg.get("tau", os.getenv("STEP_REWARD_TAU", 0.1))),
+            "step_cap": float(step_reward_cfg.get("cap", os.getenv("STEP_REWARD_CAP", 0.5))),
         }
 
     def _tool_reward_base_scores(self, output: DataProto) -> dict[str, Any]:
@@ -1235,6 +1286,9 @@ class AgentLoopManager:
         regular_tool_penalty_arr = output.non_tensor_batch.get("regular_tool_penalty")
         train_group_arr = output.non_tensor_batch.get("train_group")
         mut_v1_bucket_arr = output.non_tensor_batch.get("mut_v1_bucket")
+        step_answerability_scores_arr = output.non_tensor_batch.get("step_answerability_scores")
+        step_answerability_valid_arr = output.non_tensor_batch.get("step_answerability_valid")
+        step_answerability_records_arr = output.non_tensor_batch.get("step_answerability_records")
         if tool_exec_success_ratio_arr is None:
             tool_exec_success_ratio_arr = [0.0] * bsz
         if invalid_tool_call_arr is None:
@@ -1394,6 +1448,19 @@ class AgentLoopManager:
             else:
                 required_transforms_list.append(x)
 
+        def _json_list_array(arr):
+            src = arr if arr is not None else [""] * bsz
+            out = []
+            for item in src:
+                if isinstance(item, _np.generic):
+                    item = item.item()
+                out.append(coerce_json_list(item))
+            return out
+
+        step_answerability_scores_list = _json_list_array(step_answerability_scores_arr)
+        step_answerability_valid_list = _json_list_array(step_answerability_valid_arr)
+        step_answerability_records_list = _json_list_array(step_answerability_records_arr)
+
         return {
             "uid_list": uid_list,
             "used_any_tool_list": used_any_tool_list,
@@ -1410,6 +1477,9 @@ class AgentLoopManager:
             "tool_crop_boxes_list": tool_crop_boxes_list,
             "gt_bbox_list": gt_bbox_list,
             "required_transforms_list": required_transforms_list,
+            "step_answerability_scores_list": step_answerability_scores_list,
+            "step_answerability_valid_list": step_answerability_valid_list,
+            "step_answerability_records_list": step_answerability_records_list,
         }
 
     def _post_aggregate_rnec_only_tool_rewards(
@@ -1773,6 +1843,102 @@ class AgentLoopManager:
             "detail": detail,
             "total_tensor": total_tensor,
         }
+
+    def _post_aggregate_mut_clean_step_rewards(
+        self,
+        output: DataProto,
+        base: dict[str, Any],
+        meta: dict[str, Any],
+        params: dict[str, Any],
+        is_correct_list: list[bool],
+    ) -> None:
+        """MUT clean reward plus a small answerability-delta shaping term."""
+        new_scores = base["base_scores"].clone()
+        r_acc_list: list[float] = [0.0] * base["bsz"]
+        fmt_reward_list: list[float] = [0.0] * base["bsz"]
+        r_protocol_list: list[float] = [0.0] * base["bsz"]
+        r_mut_list: list[float] = [0.0] * base["bsz"]
+        mut_weight_list: list[float] = [0.0] * base["bsz"]
+        turn_overuse_penalty_list: list[float] = [0.0] * base["bsz"]
+        regular_tool_penalty_list: list[float] = [0.0] * base["bsz"]
+        r_base_total_list: list[float] = [0.0] * base["bsz"]
+        r_step_raw_list: list[float] = [0.0] * base["bsz"]
+        r_step_list: list[float] = [0.0] * base["bsz"]
+        step_scored_count_list: list[int] = [0] * base["bsz"]
+        step_valid_count_list: list[int] = [0] * base["bsz"]
+        step_best_score_list: list[float] = [0.0] * base["bsz"]
+        r_total_list: list[float] = [0.0] * base["bsz"]
+        details: list[str] = [""] * base["bsz"]
+
+        for i in range(base["bsz"]):
+            base_components = self._compute_mut_clean_tool_reward_for_sample(
+                idx=i,
+                base=base,
+                meta=meta,
+                params=params,
+                is_correct=is_correct_list[i],
+                format_reward=self._format_reward_value(output, i),
+            )
+            step_delta = compute_step_answerability_delta(
+                meta["step_answerability_scores_list"][i],
+                meta["step_answerability_valid_list"][i],
+                tau=params["step_tau"],
+                cap=params["step_cap"],
+            )
+            r_step_raw = float(step_delta["capped_delta"])
+            r_step = params["step_weight"] * base_components["mut_weight"] * r_step_raw
+            r_total = base_components["r_total"] + r_step
+
+            new_scores[i] = torch.tensor(r_total, dtype=base["base_scores"].dtype, device=base["base_scores"].device)
+            r_acc_list[i] = base_components["r_acc"]
+            fmt_reward_list[i] = base_components["fmt_reward"]
+            r_protocol_list[i] = base_components["r_protocol"]
+            r_mut_list[i] = base_components["r_mut"]
+            mut_weight_list[i] = base_components["mut_weight"]
+            turn_overuse_penalty_list[i] = base_components["turn_overuse_penalty"]
+            regular_tool_penalty_list[i] = base_components["regular_tool_penalty"]
+            r_base_total_list[i] = base_components["r_total"]
+            r_step_raw_list[i] = r_step_raw
+            r_step_list[i] = r_step
+            step_scored_count_list[i] = int(step_delta["scored_count"])
+            step_valid_count_list[i] = int(step_delta["valid_count"])
+            step_best = step_delta.get("best_score")
+            step_best_score_list[i] = float(step_best) if step_best is not None else 0.0
+            r_total_list[i] = r_total
+            details[i] = (
+                f"{base_components['detail'].rstrip('.')} "
+                f"StepRewardVersion: {STEP_REWARD_VERSION}, "
+                f"StepScores: {meta['step_answerability_scores_list'][i]}, "
+                f"StepValid: {meta['step_answerability_valid_list'][i]}, "
+                f"StepGains: {step_delta['step_gains']}, "
+                f"R_base_total: {base_components['r_total']}, R_step_raw: {r_step_raw}, "
+                f"R_step: {r_step}, R_total: {r_total}."
+            )
+            print(details[i])
+
+        self._write_tool_reward_outputs(
+            output=output,
+            new_scores=new_scores,
+            response_lengths=base["response_lengths"],
+            details=details,
+            components={
+                "R_acc": r_acc_list,
+                "R_fmt": fmt_reward_list,
+                "R_protocol": r_protocol_list,
+                "R_mut": r_mut_list,
+                "MutWeight": mut_weight_list,
+                "P_turn_overuse": turn_overuse_penalty_list,
+                "P_regular_tool": regular_tool_penalty_list,
+                "R_base_total": r_base_total_list,
+                "R_step_raw": r_step_raw_list,
+                "R_step": r_step_list,
+                "StepScoredCount": step_scored_count_list,
+                "StepValidCount": step_valid_count_list,
+                "StepBestScore": step_best_score_list,
+                "R_total": r_total_list,
+                "NumTurns": meta["code_count_list"],
+            },
+        )
 
     def _post_aggregate_simple_penalty_tool_rewards(
         self,

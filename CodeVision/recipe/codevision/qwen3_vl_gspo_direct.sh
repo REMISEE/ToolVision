@@ -93,6 +93,17 @@ tool_reward_clean_tool_baseline_weight="${TOOL_REWARD_CLEAN_TOOL_BASELINE_WEIGHT
 tool_reward_mut_protocol_weight="${TOOL_REWARD_MUT_PROTOCOL_WEIGHT:-0.2}"
 tool_reward_mut_turn_penalty_weight="${TOOL_REWARD_MUT_TURN_PENALTY_WEIGHT:-0.05}"
 tool_reward_mut_turn_penalty_threshold="${TOOL_REWARD_MUT_TURN_PENALTY_THRESHOLD:-6}"
+step_reward_enable="${STEP_REWARD_ENABLE:-False}"
+step_reward_weight="${STEP_REWARD_WEIGHT:-0.2}"
+step_reward_tau="${STEP_REWARD_TAU:-0.1}"
+step_reward_cap="${STEP_REWARD_CAP:-0.5}"
+step_judge_base_url="${STEP_JUDGE_BASE_URL:-}"
+step_judge_model="${STEP_JUDGE_MODEL:-}"
+step_judge_api_key_env="${STEP_JUDGE_API_KEY_ENV:-STEP_JUDGE_API_KEY}"
+step_judge_timeout="${STEP_JUDGE_TIMEOUT:-60}"
+step_judge_max_retries="${STEP_JUDGE_MAX_RETRIES:-1}"
+step_judge_max_images="${STEP_JUDGE_MAX_IMAGES:-4}"
+step_judge_max_observation_chars="${STEP_JUDGE_MAX_OBSERVATION_CHARS:-4000}"
 format_reward_weight="${FORMAT_REWARD_WEIGHT:-0.2}"
 # Async reward computation: fire reward_fn as a Ray future at the start of the
 # reward stage and only block on it right before advantage compute. The reward
@@ -214,12 +225,18 @@ echo "TOOL_REWARD_MODE=${tool_reward_mode}"
 echo "TOOL_REWARD_MUT_PROTOCOL_WEIGHT=${tool_reward_mut_protocol_weight}"
 echo "TOOL_REWARD_MUT_TURN_PENALTY_WEIGHT=${tool_reward_mut_turn_penalty_weight}"
 echo "TOOL_REWARD_MUT_TURN_PENALTY_THRESHOLD=${tool_reward_mut_turn_penalty_threshold}"
+echo "STEP_REWARD_ENABLE=${step_reward_enable}"
+echo "STEP_REWARD_WEIGHT=${step_reward_weight}"
+echo "STEP_REWARD_TAU=${step_reward_tau}"
+echo "STEP_REWARD_CAP=${step_reward_cap}"
+echo "STEP_JUDGE_BASE_URL=$([[ -n "${step_judge_base_url}" ]] && echo "${step_judge_base_url}" || echo '<unset>')"
+echo "STEP_JUDGE_MODEL=$([[ -n "${step_judge_model}" ]] && echo "${step_judge_model}" || echo '<unset>')"
 echo "FORMAT_REWARD_WEIGHT=${format_reward_weight}"
 
 if [[ "${DISABLE_TOOL_PROXY:-1}" == "1" ]]; then
     unset http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY
     tool_no_proxy="localhost,127.0.0.1"
-    for url in "${OCR_BASE_URL:-}" "${GROUNDEDSAM2_BASE_URL:-}" "${DEPTH_BASE_URL:-}" "${COUNTGD_BASE_URL:-}"; do
+    for url in "${OCR_BASE_URL:-}" "${GROUNDEDSAM2_BASE_URL:-}" "${DEPTH_BASE_URL:-}" "${COUNTGD_BASE_URL:-}" "${step_judge_base_url:-}"; do
         host="$(python3 - <<'PY' "${url}"
 import sys
 from urllib.parse import urlparse
@@ -345,6 +362,17 @@ python3 -m verl.trainer.main_ppo \
     +reward_model.tool_reward.mut_protocol_weight=${tool_reward_mut_protocol_weight} \
     +reward_model.tool_reward.mut_turn_penalty_weight=${tool_reward_mut_turn_penalty_weight} \
     +reward_model.tool_reward.mut_turn_penalty_threshold=${tool_reward_mut_turn_penalty_threshold} \
+    +reward_model.step_reward.enable=${step_reward_enable} \
+    +reward_model.step_reward.weight=${step_reward_weight} \
+    +reward_model.step_reward.tau=${step_reward_tau} \
+    +reward_model.step_reward.cap=${step_reward_cap} \
+    +reward_model.step_reward.base_url=${step_judge_base_url} \
+    +reward_model.step_reward.model=${step_judge_model} \
+    +reward_model.step_reward.api_key_env=${step_judge_api_key_env} \
+    +reward_model.step_reward.timeout_s=${step_judge_timeout} \
+    +reward_model.step_reward.max_retries=${step_judge_max_retries} \
+    +reward_model.step_reward.max_images=${step_judge_max_images} \
+    +reward_model.step_reward.max_observation_chars=${step_judge_max_observation_chars} \
     reward_model.launch_reward_fn_async=${reward_launch_async} \
     +reward_model.format_reward_weight=${format_reward_weight} \
     +reward_model.exec_reward_weight=${exec_reward_weight} \

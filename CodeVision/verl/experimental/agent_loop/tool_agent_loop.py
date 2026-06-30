@@ -34,6 +34,15 @@ from verl.tools.utils.tool_registry import initialize_tools_from_config
 from verl.utils.profiler import simple_timer
 from verl.utils.rollout_trace import rollout_trace_op
 
+try:
+    from recipe.codevision.rewards.step_answerability import (
+        STEP_REWARD_VERSION,
+        StepAnswerabilityJudgeClient,
+    )
+except Exception:  # pragma: no cover - optional in non-CodeVision deployments
+    STEP_REWARD_VERSION = "step_answerability_delta_v1"
+    StepAnswerabilityJudgeClient = None
+
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
@@ -76,15 +85,18 @@ class AgentData:
         metrics: dict[str, Any],
         request_id: str,
         tools_kwargs: dict[str, Any],
+        reward_context: Optional[dict[str, Any]] = None,
         interaction: Optional[BaseInteraction] = None,
         interaction_kwargs: Optional[dict[str, Any]] = None,
     ):
         self.messages = messages
         self.image_data = image_data
         self.orgin_image_data = orgin_image_data
+        self.initial_origin_image_data = copy.deepcopy(orgin_image_data)
         self.metrics = metrics
         self.request_id = request_id
         self.tools_kwargs = tools_kwargs
+        self.reward_context = reward_context or {}
         self.interaction = interaction
         self.interaction_kwargs = interaction_kwargs or {}
 
@@ -106,6 +118,11 @@ class AgentData:
         # Track tool execution status across the entire loop
         self.tool_exec_error_count: int = 0
         self.tool_exec_success_count: int = 0
+        # Optional answerability scores: baseline V0 plus one score per tool step.
+        self.step_answerability_v0: float | None = None
+        self.step_answerability_step_scores: list[float | None] = []
+        self.step_answerability_valid: list[bool] = []
+        self.step_answerability_records: list[dict[str, Any]] = []
 
 
 def _normalize_helper_tool_name(name: Any) -> str:
@@ -172,6 +189,11 @@ class ToolAgentLoop(AgentLoopBase):
             model_name=os.getenv("TOOL_JUDGE_MODEL_NAME", os.getenv("LLM_JUDGE_MODEL_NAME", None)),
             temperature=0.0,
         )
+        step_reward_cfg = config.reward_model.get("step_reward", {})
+        if StepAnswerabilityJudgeClient is not None:
+            cls.step_answerability_judge = StepAnswerabilityJudgeClient.from_mapping(step_reward_cfg)
+        else:
+            cls.step_answerability_judge = None
 
         cls.apply_chat_template_kwargs = config.data.get("apply_chat_template_kwargs", {})
         cls.prompt_length = config.actor_rollout_ref.rollout.prompt_length
@@ -219,6 +241,11 @@ class ToolAgentLoop(AgentLoopBase):
             metrics=metrics,
             request_id=request_id,
             tools_kwargs=tools_kwargs,
+            reward_context={
+                "data_source": kwargs.get("data_source", ""),
+                "extra_info": copy.deepcopy(kwargs.get("extra_info", {}) or {}),
+                "reward_model": copy.deepcopy(kwargs.get("reward_model", {}) or {}),
+            },
             interaction=interaction,
             interaction_kwargs=interaction_kwargs,
         )
@@ -284,6 +311,24 @@ class ToolAgentLoop(AgentLoopBase):
             "tool_exec_error_count": agent_data.tool_exec_error_count,
             # Total code executions (success + error)
             "code_count": agent_data.tool_exec_error_count + agent_data.tool_exec_success_count,
+            "step_answerability_version": STEP_REWARD_VERSION,
+            "step_answerability_v0": agent_data.step_answerability_v0,
+            "step_answerability_scores": json.dumps(
+                _to_jsonable(
+                    (
+                        [agent_data.step_answerability_v0]
+                        if agent_data.step_answerability_v0 is not None
+                        else []
+                    )
+                    + agent_data.step_answerability_step_scores
+                ),
+                ensure_ascii=False,
+            ),
+            "step_answerability_valid": json.dumps(_to_jsonable(agent_data.step_answerability_valid), ensure_ascii=False),
+            "step_answerability_records": json.dumps(
+                _to_jsonable(agent_data.step_answerability_records),
+                ensure_ascii=False,
+            ),
         })
         return output
 
@@ -411,14 +456,19 @@ class ToolAgentLoop(AgentLoopBase):
             responses = await asyncio.gather(*tasks)
 
         # Process tool responses and update multi_modal_data
+        step_observation_text_parts: list[str] = []
+        step_has_error = False
         for tool_response in responses:
             for helper_name in _helper_tool_names_from_response(tool_response):
                 agent_data.tools_used.append(helper_name)
 
             # Track execution success/failure from tool response
             text_payload = getattr(tool_response, "text", None) or ""
+            if text_payload:
+                step_observation_text_parts.append(str(text_payload))
             if isinstance(text_payload, str) and "Error" in text_payload:
                 agent_data.tool_exec_error_count += 1
+                step_has_error = True
             else:
                 agent_data.tool_exec_success_count += 1
             # Prepare valid images first so placeholders match valid image count
@@ -539,7 +589,111 @@ class ToolAgentLoop(AgentLoopBase):
         if agent_data.response_logprobs:
             agent_data.response_logprobs += [0.0] * len(response_ids)
         agent_data.user_turns += 1
+        await self._maybe_score_step_answerability(
+            agent_data=agent_data,
+            step_idx=agent_data.user_turns,
+            valid_step=bool(responses) and not step_has_error,
+            observation_text="\n\n".join(step_observation_text_parts),
+        )
         return AgentState.GENERATING
+
+    async def _maybe_score_step_answerability(
+        self,
+        *,
+        agent_data: AgentData,
+        step_idx: int,
+        valid_step: bool,
+        observation_text: str,
+    ) -> None:
+        client = getattr(self.__class__, "step_answerability_judge", None)
+        if client is None or not getattr(client, "enabled", False):
+            return
+
+        context = agent_data.reward_context or {}
+        extra_info = context.get("extra_info") if isinstance(context.get("extra_info"), dict) else {}
+        reward_model = context.get("reward_model") if isinstance(context.get("reward_model"), dict) else {}
+        data_source = str(context.get("data_source") or extra_info.get("source_dataset") or "")
+        ground_truth = reward_model.get("ground_truth", None)
+        if ground_truth is None:
+            ground_truth = extra_info.get("ground_truth", extra_info.get("answer", extra_info.get("gt_answer", None)))
+        question = self._step_answerability_question(agent_data, extra_info)
+        answer_instruction = self._step_answerability_answer_instruction(extra_info)
+
+        if agent_data.step_answerability_v0 is None:
+            baseline_record = await self.loop.run_in_executor(
+                None,
+                lambda: client.score_state(
+                    data_source=data_source,
+                    ground_truth=ground_truth,
+                    extra_info=extra_info,
+                    question=question,
+                    answer_instruction=answer_instruction,
+                    state_label="baseline_before_tools",
+                    observation_text="No tool has been used yet.",
+                    images=self._normalize_images(agent_data.initial_origin_image_data),
+                ),
+            )
+            agent_data.step_answerability_records.append(baseline_record)
+            if baseline_record.get("score") is not None:
+                try:
+                    agent_data.step_answerability_v0 = float(baseline_record["score"])
+                except Exception:
+                    agent_data.step_answerability_v0 = None
+
+        step_record = await self.loop.run_in_executor(
+            None,
+            lambda: client.score_state(
+                data_source=data_source,
+                ground_truth=ground_truth,
+                extra_info=extra_info,
+                question=question,
+                answer_instruction=answer_instruction,
+                state_label=f"after_tool_step_{step_idx}",
+                observation_text=observation_text,
+                images=self._normalize_images(agent_data.orgin_image_data),
+            ),
+        )
+        agent_data.step_answerability_records.append(step_record)
+        score = step_record.get("score")
+        try:
+            agent_data.step_answerability_step_scores.append(float(score) if score is not None else None)
+        except Exception:
+            agent_data.step_answerability_step_scores.append(None)
+        agent_data.step_answerability_valid.append(bool(valid_step and step_record.get("error") is None))
+
+    def _step_answerability_question(self, agent_data: AgentData, extra_info: dict[str, Any]) -> str:
+        question = str(extra_info.get("question") or "").strip()
+        if question:
+            return question
+        for message in agent_data.messages:
+            if message.get("role") != "user":
+                continue
+            content = message.get("content")
+            if isinstance(content, str) and content.strip():
+                return content.strip()
+            if isinstance(content, list):
+                texts = [str(item.get("text", "")).strip() for item in content if isinstance(item, dict)]
+                text = "\n".join(item for item in texts if item)
+                if text:
+                    return text
+        return ""
+
+    def _step_answerability_answer_instruction(self, extra_info: dict[str, Any]) -> str | None:
+        for key in ("answer_instruction", "metric_note"):
+            value = extra_info.get(key)
+            if value:
+                return str(value)
+        answer_type = extra_info.get("answer_type")
+        if answer_type:
+            return f"Answer type: {answer_type}."
+        return None
+
+    def _normalize_images(self, images: Any) -> list[Any]:
+        if images is None:
+            return []
+        if isinstance(images, list):
+            return list(images)
+        return [images]
 
     async def _handle_interacting_state(self, agent_data: AgentData) -> AgentState:
         """Handle the interacting state: get user input from interaction."""

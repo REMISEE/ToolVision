@@ -1318,6 +1318,11 @@ class RayPPOTrainer:
                 "tool_exec_error_count",
                 "code_count",
                 "tool_reward_detail",
+                "step_answerability_version",
+                "step_answerability_v0",
+                "step_answerability_scores",
+                "step_answerability_valid",
+                "step_answerability_records",
             ]
             batch_dump_extra_infos_dict: dict[str, list] = defaultdict(list)
             for key in dump_keys:
@@ -2082,8 +2087,19 @@ class RayPPOTrainer:
                                 "MutWeight",
                                 "P_regular_tool",
                                 "P_turn_overuse",
+                                "R_base_total",
+                                "R_step_raw",
+                                "R_step",
+                                "StepScoredCount",
+                                "StepValidCount",
+                                "StepBestScore",
                                 "R_total",
                                 "NumTurns",
+                                "step_answerability_version",
+                                "step_answerability_v0",
+                                "step_answerability_scores",
+                                "step_answerability_valid",
+                                "step_answerability_records",
                             ):
                                 if key in batch.non_tensor_batch:
                                     values = batch.non_tensor_batch[key]

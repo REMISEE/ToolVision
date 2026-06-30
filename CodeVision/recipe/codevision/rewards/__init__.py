@@ -6,5 +6,17 @@ the legacy benchmark/eval reward code.
 """
 
 from .router import compute_toolvision_score
+from .step_answerability import (
+    STEP_REWARD_VERSION,
+    StepAnswerabilityConfig,
+    StepAnswerabilityJudgeClient,
+    compute_step_answerability_delta,
+)
 
-__all__ = ["compute_toolvision_score"]
+__all__ = [
+    "STEP_REWARD_VERSION",
+    "StepAnswerabilityConfig",
+    "StepAnswerabilityJudgeClient",
+    "compute_step_answerability_delta",
+    "compute_toolvision_score",
+]
