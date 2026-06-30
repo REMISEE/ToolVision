@@ -154,6 +154,8 @@ class StepAnswerabilityConfig:
     api_key_env: str = "STEP_JUDGE_API_KEY"
     timeout_s: float = 60.0
     max_retries: int = 1
+    num_judgments: int = 1
+    aggregation: str = "mean"
     max_images: int = 4
     max_observation_chars: int = 4000
     request_body: dict[str, Any] | None = None
@@ -173,6 +175,8 @@ class StepAnswerabilityConfig:
             api_key_env=str(get("api_key_env", os.getenv("STEP_JUDGE_API_KEY_ENV", "STEP_JUDGE_API_KEY")) or "").strip(),
             timeout_s=as_float(get("timeout_s", os.getenv("STEP_JUDGE_TIMEOUT", "60")), 60.0),
             max_retries=as_int(get("max_retries", os.getenv("STEP_JUDGE_MAX_RETRIES", "1")), 1),
+            num_judgments=max(1, as_int(get("num_judgments", os.getenv("STEP_JUDGE_NUM_JUDGMENTS", "1")), 1)),
+            aggregation=str(get("aggregation", os.getenv("STEP_JUDGE_AGGREGATION", "mean")) or "mean").strip().lower(),
             max_images=as_int(get("max_images", os.getenv("STEP_JUDGE_MAX_IMAGES", "4")), 4),
             max_observation_chars=as_int(
                 get("max_observation_chars", os.getenv("STEP_JUDGE_MAX_OBSERVATION_CHARS", "4000")),
@@ -223,39 +227,91 @@ class StepAnswerabilityJudgeClient:
             return record
 
         try:
-            raw_answer, raw_payload = self._call_model(
-                question=question,
-                answer_instruction=answer_instruction,
-                state_label=state_label,
-                observation_text=observation_text,
-                images=images,
-            )
-            final_answer = extract_answer(raw_answer) or self._clean_answer_text(raw_answer)
-            result = compute_toolvision_score(
-                data_source=data_source,
-                solution_str=f"<answer>{final_answer}</answer>",
-                ground_truth=ground_truth,
-                extra_info=extra_info,
-                extracted_answer=final_answer,
-            )
-            if result is None:
-                score = 0.0
-            else:
-                score = float(result.get("score", 0.0) or 0.0)
-            record.update(
-                {
-                    "score": score,
-                    "raw_answer": raw_answer,
-                    "final_answer": final_answer,
-                    "usage": raw_payload.get("usage", {}) if isinstance(raw_payload, dict) else {},
+            judgments: list[dict[str, Any]] = []
+            for judgment_idx in range(max(1, int(self.config.num_judgments))):
+                judgment_record: dict[str, Any] = {
+                    "judgment_idx": judgment_idx,
+                    "score": None,
+                    "raw_answer": "",
+                    "final_answer": "",
+                    "usage": {},
                     "error": None,
                 }
-            )
-        except Exception as exc:
-            record["error"] = str(exc)
+                try:
+                    raw_answer, raw_payload = self._call_model(
+                        question=question,
+                        answer_instruction=answer_instruction,
+                        state_label=state_label,
+                        observation_text=observation_text,
+                        images=images,
+                    )
+                    final_answer = extract_answer(raw_answer) or self._clean_answer_text(raw_answer)
+                    result = compute_toolvision_score(
+                        data_source=data_source,
+                        solution_str=f"<answer>{final_answer}</answer>",
+                        ground_truth=ground_truth,
+                        extra_info=extra_info,
+                        extracted_answer=final_answer,
+                    )
+                    if result is None:
+                        score = 0.0
+                    else:
+                        score = float(result.get("score", 0.0) or 0.0)
+                    judgment_record.update(
+                        {
+                            "score": score,
+                            "raw_answer": raw_answer,
+                            "final_answer": final_answer,
+                            "usage": raw_payload.get("usage", {}) if isinstance(raw_payload, dict) else {},
+                            "error": None,
+                        }
+                    )
+                except Exception as exc:
+                    judgment_record["error"] = str(exc)
+                judgments.append(judgment_record)
+
+            valid_judgments = [item for item in judgments if item.get("score") is not None]
+            if valid_judgments:
+                scores = [float(item["score"]) for item in valid_judgments]
+                score = self._aggregate_scores(scores)
+                first_valid = valid_judgments[0]
+                record.update(
+                    {
+                        "score": score,
+                        "raw_answer": first_valid.get("raw_answer", ""),
+                        "final_answer": first_valid.get("final_answer", ""),
+                        "usage": first_valid.get("usage", {}),
+                        "judgments": judgments,
+                        "judgment_count": len(valid_judgments),
+                        "score_std": self._score_std(scores),
+                        "error": None,
+                    }
+                )
+            else:
+                record["judgments"] = judgments
+                record["judgment_count"] = 0
+                record["score_std"] = 0.0
+                errors = [str(item.get("error")) for item in judgments if item.get("error")]
+                record["error"] = "; ".join(errors) or "all step answerability judgments failed"
         finally:
             record["latency_s"] = round(time.perf_counter() - started, 3)
         return record
+
+    def _aggregate_scores(self, scores: list[float]) -> float:
+        if not scores:
+            return 0.0
+        mode = self.config.aggregation
+        if mode == "max":
+            return max(scores)
+        if mode == "min":
+            return min(scores)
+        return sum(scores) / len(scores)
+
+    def _score_std(self, scores: list[float]) -> float:
+        if len(scores) <= 1:
+            return 0.0
+        mean = sum(scores) / len(scores)
+        return (sum((score - mean) ** 2 for score in scores) / len(scores)) ** 0.5
 
     def _call_model(
         self,

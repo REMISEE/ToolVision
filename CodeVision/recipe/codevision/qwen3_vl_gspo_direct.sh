@@ -102,6 +102,8 @@ step_judge_model="${STEP_JUDGE_MODEL:-}"
 step_judge_api_key_env="${STEP_JUDGE_API_KEY_ENV:-STEP_JUDGE_API_KEY}"
 step_judge_timeout="${STEP_JUDGE_TIMEOUT:-60}"
 step_judge_max_retries="${STEP_JUDGE_MAX_RETRIES:-1}"
+step_judge_num_judgments="${STEP_JUDGE_NUM_JUDGMENTS:-1}"
+step_judge_aggregation="${STEP_JUDGE_AGGREGATION:-mean}"
 step_judge_max_images="${STEP_JUDGE_MAX_IMAGES:-4}"
 step_judge_max_observation_chars="${STEP_JUDGE_MAX_OBSERVATION_CHARS:-4000}"
 format_reward_weight="${FORMAT_REWARD_WEIGHT:-0.2}"
@@ -231,6 +233,8 @@ echo "STEP_REWARD_TAU=${step_reward_tau}"
 echo "STEP_REWARD_CAP=${step_reward_cap}"
 echo "STEP_JUDGE_BASE_URL=$([[ -n "${step_judge_base_url}" ]] && echo "${step_judge_base_url}" || echo '<unset>')"
 echo "STEP_JUDGE_MODEL=$([[ -n "${step_judge_model}" ]] && echo "${step_judge_model}" || echo '<unset>')"
+echo "STEP_JUDGE_NUM_JUDGMENTS=${step_judge_num_judgments}"
+echo "STEP_JUDGE_AGGREGATION=${step_judge_aggregation}"
 echo "FORMAT_REWARD_WEIGHT=${format_reward_weight}"
 
 if [[ "${DISABLE_TOOL_PROXY:-1}" == "1" ]]; then
@@ -371,6 +375,8 @@ python3 -m verl.trainer.main_ppo \
     +reward_model.step_reward.api_key_env=${step_judge_api_key_env} \
     +reward_model.step_reward.timeout_s=${step_judge_timeout} \
     +reward_model.step_reward.max_retries=${step_judge_max_retries} \
+    +reward_model.step_reward.num_judgments=${step_judge_num_judgments} \
+    +reward_model.step_reward.aggregation=${step_judge_aggregation} \
     +reward_model.step_reward.max_images=${step_judge_max_images} \
     +reward_model.step_reward.max_observation_chars=${step_judge_max_observation_chars} \
     reward_model.launch_reward_fn_async=${reward_launch_async} \

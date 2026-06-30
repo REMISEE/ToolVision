@@ -50,6 +50,8 @@ Defaults:
 step_weight = 0.2
 tau = 0.1
 cap = 0.5
+step_judge_num_judgments = 1
+step_judge_aggregation = mean
 ```
 
 Invalid tool steps and judge failures get no positive step gain. Repeating many
@@ -89,6 +91,9 @@ JUDGE_REPLICA_GPUS=0 \
 bash scripts/submit_dlc_step_judge_service.sh
 ```
 
+The judge service does not need to use the RL conda env. It can run in any DLC
+image/env that can host an OpenAI-compatible API; the RL job only calls HTTP.
+
 The default backend is:
 
 ```bash
@@ -114,4 +119,17 @@ Then launch RL with the printed exports plus:
 ```bash
 TOOL_REWARD_MODE=mut_clean_step_v1
 STEP_REWARD_ENABLE=True
+STEP_JUDGE_NUM_JUDGMENTS=1
+STEP_JUDGE_AGGREGATION=mean
 ```
+
+For lower judge variance, run repeated judgments per state:
+
+```bash
+STEP_JUDGE_NUM_JUDGMENTS=2
+STEP_JUDGE_AGGREGATION=mean
+```
+
+This calls the same configured judge endpoint twice for each baseline/step
+state and averages rule-scored correctness. It is useful when the judge request
+uses nonzero sampling temperature or the serving stack has nondeterminism.
