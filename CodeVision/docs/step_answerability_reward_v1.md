@@ -72,3 +72,46 @@ StepScoredCount
 StepValidCount
 StepBestScore
 ```
+
+## DLC Judge Service
+
+The recommended deployment is a separate long-running DLC job, same shape as
+the existing tool-service job. The RL job only receives `STEP_JUDGE_BASE_URL`
+and `STEP_JUDGE_MODEL`.
+
+Submit one judge replica:
+
+```bash
+JUDGE_MODEL_PATH=/path/to/judge/model \
+JUDGE_MODEL_NAME=step-judge \
+JUDGE_REPLICA_COUNT=1 \
+JUDGE_REPLICA_GPUS=0 \
+bash scripts/submit_dlc_step_judge_service.sh
+```
+
+The default backend is:
+
+```bash
+vllm serve "${JUDGE_MODEL_PATH}" --host 0.0.0.0 --port "${JUDGE_PORT}"
+```
+
+If the actual deployment uses another framework, override the server command:
+
+```bash
+JUDGE_SERVER_CMD='swift deploy --model "$JUDGE_MODEL_PATH" --host 0.0.0.0 --port "$JUDGE_PORT" --infer_backend vllm' \
+JUDGE_MODEL_PATH=/path/to/judge/model \
+bash scripts/submit_dlc_step_judge_service.sh
+```
+
+After the job starts, get the RL environment values:
+
+```bash
+bash scripts/step_judge_url_from_job.sh <judge_job_id_or_name>
+```
+
+Then launch RL with the printed exports plus:
+
+```bash
+TOOL_REWARD_MODE=mut_clean_step_v1
+STEP_REWARD_ENABLE=True
+```
