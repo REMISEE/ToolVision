@@ -176,12 +176,35 @@ build_committee_json() {
   python3 - <<'PY'
 import json
 import os
+import sys
 
 temp_a = float(os.environ.get("COMMITTEE_TEMPERATURE_A", "0.2"))
 temp_b = float(os.environ.get("COMMITTEE_TEMPERATURE_B", "0.3"))
 timeout_s = float(os.environ.get("COMMITTEE_TIMEOUT_S", "120"))
 max_retries = int(os.environ.get("COMMITTEE_MAX_RETRIES", "0"))
 members = []
+
+
+def parse_request_body(env_name):
+    raw = (os.environ.get(env_name, "") or "{}").strip()
+    if not raw:
+        return {}
+    for quote in ("'", '"'):
+        if raw.startswith(quote) and raw.endswith(quote):
+            raw = raw[1:-1].strip()
+            break
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        try:
+            parsed, end = json.JSONDecoder().raw_decode(raw)
+        except json.JSONDecodeError:
+            print(f"Warning: ignoring invalid {env_name}: {exc}", file=sys.stderr)
+            return {}
+        tail = raw[end:].strip()
+        if tail:
+            print(f"Warning: ignored trailing characters in {env_name}: {tail[:80]!r}", file=sys.stderr)
+        return parsed
 
 
 def add_pair(name, base_url, model, api_key_env, request_body=None):
@@ -216,7 +239,7 @@ if api1_key and os.environ.get("COMMITTEE_API1_BASE_URL") and os.environ.get("CO
         os.environ["COMMITTEE_API1_BASE_URL"],
         os.environ["COMMITTEE_API1_MODEL"],
         "COMMITTEE_API1_API_KEY_RUNTIME",
-        json.loads(os.environ.get("COMMITTEE_API1_REQUEST_BODY", "{}") or "{}"),
+        parse_request_body("COMMITTEE_API1_REQUEST_BODY"),
     )
 
 api2_key = os.environ.get("COMMITTEE_API2_API_KEY", "")
@@ -227,7 +250,7 @@ if api2_key and os.environ.get("COMMITTEE_API2_BASE_URL") and os.environ.get("CO
         os.environ["COMMITTEE_API2_BASE_URL"],
         os.environ["COMMITTEE_API2_MODEL"],
         "COMMITTEE_API2_API_KEY_RUNTIME",
-        json.loads(os.environ.get("COMMITTEE_API2_REQUEST_BODY", "{}") or "{}"),
+        parse_request_body("COMMITTEE_API2_REQUEST_BODY"),
     )
 
 print(json.dumps(members, ensure_ascii=False))
