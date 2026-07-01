@@ -214,7 +214,7 @@ def test_repeated_judgments_mean_and_reward_scale() -> None:
             observation_text="Tool observation: crop shows a cat.",
         )
         delta = compute_step_answerability_delta([baseline["score"], after["score"]], [True], tau=0.1, cap=0.5)
-        r_step = 0.2 * 0.5 * float(delta["capped_delta"])
+        r_step = 0.2 * float(delta["capped_delta"])
 
         assert_close("repeated baseline", baseline["score"], 0.0)
         assert_close("repeated after mean", after["score"], 0.5)
@@ -222,7 +222,7 @@ def test_repeated_judgments_mean_and_reward_scale() -> None:
         if after["judgment_count"] != 2:
             raise AssertionError(f"judgment_count={after['judgment_count']}, expected 2")
         assert_close("repeated raw delta", delta["raw_delta"], 0.4)
-        assert_close("repeated R_step", r_step, 0.04)
+        assert_close("repeated R_step", r_step, 0.08)
 
 
 def test_committee_payload_averages_successes_only() -> None:

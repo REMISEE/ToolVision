@@ -84,6 +84,14 @@ logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 
+def _as_bool(value: Any, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _compute_strict_format_reward(text: str) -> float:
     """Mirror UVTRRewardManager._compute_format_reward for agent-loop fallback."""
     if text is None:
@@ -1230,6 +1238,9 @@ class AgentLoopManager:
             "step_weight": float(step_reward_cfg.get("weight", os.getenv("STEP_REWARD_WEIGHT", 0.2))),
             "step_tau": float(step_reward_cfg.get("tau", os.getenv("STEP_REWARD_TAU", 0.1))),
             "step_cap": float(step_reward_cfg.get("cap", os.getenv("STEP_REWARD_CAP", 0.5))),
+            "step_use_mut_weight": _as_bool(
+                step_reward_cfg.get("use_mut_weight", os.getenv("STEP_REWARD_USE_MUT_WEIGHT", "False"))
+            ),
         }
 
     def _tool_reward_base_scores(self, output: DataProto) -> dict[str, Any]:
@@ -1863,6 +1874,7 @@ class AgentLoopManager:
         regular_tool_penalty_list: list[float] = [0.0] * base["bsz"]
         r_base_total_list: list[float] = [0.0] * base["bsz"]
         r_step_raw_list: list[float] = [0.0] * base["bsz"]
+        step_gate_list: list[float] = [0.0] * base["bsz"]
         r_step_list: list[float] = [0.0] * base["bsz"]
         step_scored_count_list: list[int] = [0] * base["bsz"]
         step_valid_count_list: list[int] = [0] * base["bsz"]
@@ -1886,7 +1898,8 @@ class AgentLoopManager:
                 cap=params["step_cap"],
             )
             r_step_raw = float(step_delta["capped_delta"])
-            r_step = params["step_weight"] * base_components["mut_weight"] * r_step_raw
+            step_gate = base_components["mut_weight"] if params["step_use_mut_weight"] else 1.0
+            r_step = params["step_weight"] * step_gate * r_step_raw
             r_total = base_components["r_total"] + r_step
 
             new_scores[i] = torch.tensor(r_total, dtype=base["base_scores"].dtype, device=base["base_scores"].device)
@@ -1899,6 +1912,7 @@ class AgentLoopManager:
             regular_tool_penalty_list[i] = base_components["regular_tool_penalty"]
             r_base_total_list[i] = base_components["r_total"]
             r_step_raw_list[i] = r_step_raw
+            step_gate_list[i] = float(step_gate)
             r_step_list[i] = r_step
             step_scored_count_list[i] = int(step_delta["scored_count"])
             step_valid_count_list[i] = int(step_delta["valid_count"])
@@ -1912,7 +1926,7 @@ class AgentLoopManager:
                 f"StepValid: {meta['step_answerability_valid_list'][i]}, "
                 f"StepGains: {step_delta['step_gains']}, "
                 f"R_base_total: {base_components['r_total']}, R_step_raw: {r_step_raw}, "
-                f"R_step: {r_step}, R_total: {r_total}."
+                f"StepGate: {step_gate}, R_step: {r_step}, R_total: {r_total}."
             )
             print(details[i])
 
@@ -1931,6 +1945,7 @@ class AgentLoopManager:
                 "P_regular_tool": regular_tool_penalty_list,
                 "R_base_total": r_base_total_list,
                 "R_step_raw": r_step_raw_list,
+                "StepGate": step_gate_list,
                 "R_step": r_step_list,
                 "StepScoredCount": step_scored_count_list,
                 "StepValidCount": step_valid_count_list,
