@@ -7,7 +7,9 @@ set -euo pipefail
 # 16k prompt / 16k response, 1 epoch, no validation by default.
 
 ROOT_DIR="${ROOT_DIR:-/mnt/cpfs/delinmao/ToolVision/CodeVision}"
-DLC_BIN="${DLC_BIN:-dlc_pai}"
+DLC_BIN="${DLC_BIN:-$(command -v dlc_pai 2>/dev/null || command -v dlc 2>/dev/null || echo /etc/dsw/runtime/export_bin/dlc)}"
+DLC_REGION="${DLC_REGION:-cn-wulanchabu}"
+DLC_ENDPOINT="${DLC_ENDPOINT:-pai-dlc.cn-wulanchabu.aliyuncs.com}"
 
 if [[ -z "${OCR_BASE_URL:-}" || -z "${GROUNDEDSAM2_BASE_URL:-}" || -z "${DEPTH_BASE_URL:-}" || -z "${COUNTGD_BASE_URL:-}" ]]; then
   eval "$("${ROOT_DIR}/scripts/dsw_tool_urls.sh")"
@@ -234,6 +236,9 @@ fi
 TRAIN_COMMAND+=" bash scripts/dlc_ray_direct_entrypoint.sh"
 
 echo "Submitting ${JOB_NAME}"
+echo "DLC_BIN=${DLC_BIN}"
+echo "DLC_REGION=${DLC_REGION}"
+echo "DLC_ENDPOINT=${DLC_ENDPOINT}"
 echo "PROJECT_NAME=${PROJECT_NAME}"
 echo "EXP_NAME=${EXP_NAME}"
 echo "MODEL_PATH=${MODEL_PATH}"
@@ -284,7 +289,7 @@ echo "FORMAT_REWARD_WEIGHT=${FORMAT_REWARD_WEIGHT:-0.2}"
 dry_run_flag="${DRY_RUN:-0}"
 if [[ "${dry_run_flag}" == "1" || "${dry_run_flag,,}" == "true" ]]; then
   echo "DRY_RUN=1, not submitting."
-  dry_run_command="${DLC_BIN} submit pytorchjob --name=${JOB_NAME} --command=$(shell_quote "${TRAIN_COMMAND}") ..."
+  dry_run_command="${DLC_BIN} -r ${DLC_REGION} -e ${DLC_ENDPOINT} submit pytorchjob --name=${JOB_NAME} --command=$(shell_quote "${TRAIN_COMMAND}") ..."
   printf '%s\n' "${dry_run_command}" | sed \
     -e 's/\(WANDB_API_KEY=\)[^\\ ]*/\1<redacted>/g' \
     -e 's/\(LLM_JUDGE_API_KEY=\)[^\\ ]*/\1<redacted>/g' \
@@ -296,7 +301,7 @@ if [[ "${dry_run_flag}" == "1" || "${dry_run_flag,,}" == "true" ]]; then
   exit 0
 fi
 
-"${DLC_BIN}" submit pytorchjob \
+"${DLC_BIN}" -r "${DLC_REGION}" -e "${DLC_ENDPOINT}" submit pytorchjob \
   --name="${JOB_NAME}" \
   --command="${TRAIN_COMMAND}" \
   --data_source_uris="${DATA_SOURCE_URIS:-cpfs://cpfs-298fffb575a502fe.cn-wulanchabu/ptc-29f47d9393ad2b16/exp-29f2869e7d984aa6/::/mnt/cpfs,oss://pai-wlcb-ai-oss.oss-cn-wulanchabu-internal.aliyuncs.com/::/mnt/oss}" \
