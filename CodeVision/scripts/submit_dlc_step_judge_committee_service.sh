@@ -24,6 +24,7 @@ JOB_NAME="${JOB_NAME:-cv-step-judge-committee-8gpu}"
 WORKER_IMAGE="${WORKER_IMAGE:-dsw-registry-vpc.cn-wulanchabu.cr.aliyuncs.com/pai/torcheasyrec:1.1.0-pytorch2.10.0-gpu-py311-cu129-ubuntu22.04}"
 
 JUDGE_RUN_ID="${JUDGE_RUN_ID:-${JOB_NAME}}"
+JUDGE_VLLM_ENV="${JUDGE_VLLM_ENV:-/mnt/cpfs/delinmao/envs/codevision_new}"
 JUDGE_MODEL_2B_PATH="${JUDGE_MODEL_2B_PATH:-/mnt/cpfs/delinmao/models/Qwen3-VL-2B-Instruct}"
 JUDGE_MODEL_4B_PATH="${JUDGE_MODEL_4B_PATH:-/mnt/cpfs/delinmao/models/Qwen3-VL-4B-Instruct}"
 JUDGE_MODEL_8B_PATH="${JUDGE_MODEL_8B_PATH:-/mnt/cpfs/delinmao/models/Qwen3-VL-8B-Instruct}"
@@ -95,6 +96,7 @@ append_env() {
 
 COMMAND="cd $(shell_quote "${ROOT_DIR}") && bash -n scripts/dlc_step_judge_committee_entrypoint.sh && python3 -m py_compile scripts/step_judge_committee_gateway.py &&"
 append_env JUDGE_RUN_ID "${JUDGE_RUN_ID}"
+append_env JUDGE_VLLM_ENV "${JUDGE_VLLM_ENV}"
 append_env JUDGE_MODEL_2B_PATH "${JUDGE_MODEL_2B_PATH}"
 append_env JUDGE_MODEL_4B_PATH "${JUDGE_MODEL_4B_PATH}"
 append_env JUDGE_MODEL_8B_PATH "${JUDGE_MODEL_8B_PATH}"

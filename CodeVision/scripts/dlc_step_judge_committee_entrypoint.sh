@@ -12,6 +12,10 @@ fi
 
 JUDGE_RUN_ID="${JUDGE_RUN_ID:-${DLC_JOB_ID:-${PAI_JOB_ID:-${HOSTNAME:-committee}_$$}}}"
 JUDGE_OUTPUT_ROOT="${JUDGE_OUTPUT_ROOT:-${ROOT_DIR}/outputs/dlc_step_judge_committee/${JUDGE_RUN_ID}}"
+JUDGE_VLLM_ENV="${JUDGE_VLLM_ENV:-/mnt/cpfs/delinmao/envs/codevision_new}"
+if [[ -d "${JUDGE_VLLM_ENV}" ]]; then
+  export PATH="${JUDGE_VLLM_ENV}/bin:${PATH}"
+fi
 
 JUDGE_MODEL_2B_PATH="${JUDGE_MODEL_2B_PATH:-/mnt/cpfs/delinmao/models/Qwen3-VL-2B-Instruct}"
 JUDGE_MODEL_4B_PATH="${JUDGE_MODEL_4B_PATH:-/mnt/cpfs/delinmao/models/Qwen3-VL-4B-Instruct}"
@@ -258,6 +262,7 @@ trap cleanup EXIT TERM INT
 echo "Starting ToolVision step judge committee"
 echo "JUDGE_RUN_ID=${JUDGE_RUN_ID}"
 echo "JUDGE_OUTPUT_ROOT=${JUDGE_OUTPUT_ROOT}"
+echo "JUDGE_VLLM_ENV=${JUDGE_VLLM_ENV}"
 echo "GPU layout: 2B=${JUDGE_GPU_2B}, 4B=${JUDGE_GPU_4B}, 8B=${JUDGE_GPU_8B}, 32B=${JUDGE_GPU_32B}, 8B-test=${JUDGE_GPU_8B_TEST}"
 echo "Ports: 2B=${JUDGE_PORT_2B}, 4B=${JUDGE_PORT_4B}, 8B=${JUDGE_PORT_8B}, 32B=${JUDGE_PORT_32B}, 8B-test=${JUDGE_PORT_8B_TEST}, gateway=${COMMITTEE_PORT}"
 echo "API members: api1=$([[ -n "${COMMITTEE_API1_API_KEY}" ]] && echo enabled || echo disabled), api2=$([[ -n "${COMMITTEE_API2_API_KEY}" ]] && echo enabled || echo disabled)"
