@@ -12,6 +12,8 @@ set -euo pipefail
 
 ROOT_DIR="${ROOT_DIR:-/mnt/cpfs/delinmao/ToolVision/CodeVision}"
 DLC_BIN="${DLC_BIN:-$(command -v dlc_pai 2>/dev/null || command -v dlc 2>/dev/null || echo /etc/dsw/runtime/export_bin/dlc)}"
+DLC_REGION="${DLC_REGION:-cn-wulanchabu}"
+DLC_ENDPOINT="${DLC_ENDPOINT:-pai-dlc.cn-wulanchabu.aliyuncs.com}"
 COMMITTEE_ENV_FILE="${COMMITTEE_ENV_FILE:-/mnt/cpfs/delinmao/log1}"
 if [[ -f "${COMMITTEE_ENV_FILE}" ]]; then
   set -a
@@ -141,6 +143,8 @@ COMMAND+=" bash scripts/dlc_step_judge_committee_entrypoint.sh"
 
 echo "Submitting ${JOB_NAME}"
 echo "DLC_BIN=${DLC_BIN}"
+echo "DLC_REGION=${DLC_REGION}"
+echo "DLC_ENDPOINT=${DLC_ENDPOINT}"
 echo "ROOT_DIR=${ROOT_DIR}"
 echo "WORKER_GPU=${WORKER_GPU}"
 echo "ADVANCED_SETTINGS=${ADVANCED_SETTINGS}"
@@ -158,7 +162,7 @@ echo "API members: api1=$([[ -n "${COMMITTEE_API1_API_KEY}" ]] && echo enabled |
 
 if [[ "${DRY_RUN}" == "1" || "${DRY_RUN,,}" == "true" ]]; then
   echo "DRY_RUN=1, not submitting."
-  printf '%s\n' "${DLC_BIN} submit pytorchjob --name=${JOB_NAME} --command=$(shell_quote "${COMMAND}") ..." | sed \
+  printf '%s\n' "${DLC_BIN} -r ${DLC_REGION} -e ${DLC_ENDPOINT} submit pytorchjob --name=${JOB_NAME} --command=$(shell_quote "${COMMAND}") ..." | sed \
     -e 's/\(COMMITTEE_API_KEY=\)[^\\ ]*/\1<redacted>/g' \
     -e 's/\(JUDGE_LOCAL_API_KEY=\)[^\\ ]*/\1<redacted>/g' \
     -e 's/\(COMMITTEE_API1_API_KEY=\)[^\\ ]*/\1<redacted>/g' \
@@ -166,7 +170,7 @@ if [[ "${DRY_RUN}" == "1" || "${DRY_RUN,,}" == "true" ]]; then
   exit 0
 fi
 
-"${DLC_BIN}" submit pytorchjob \
+"${DLC_BIN}" -r "${DLC_REGION}" -e "${DLC_ENDPOINT}" submit pytorchjob \
   --name="${JOB_NAME}" \
   --command="${COMMAND}" \
   --data_source_uris="${DATA_SOURCE_URIS}" \
