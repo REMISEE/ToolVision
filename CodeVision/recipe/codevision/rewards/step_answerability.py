@@ -538,6 +538,10 @@ class StepAnswerabilityJudgeClient:
         try:
             if not hasattr(image, "save"):
                 return ""
+            width, height = getattr(image, "size", (0, 0))
+            if width and height and (width <= 10 or height <= 10) and hasattr(image, "resize"):
+                scale = max(32 / max(1, width), 32 / max(1, height))
+                image = image.resize((max(11, int(round(width * scale))), max(11, int(round(height * scale)))))
             buffer = io.BytesIO()
             image.save(buffer, format="PNG")
             data = base64.b64encode(buffer.getvalue()).decode("ascii")
