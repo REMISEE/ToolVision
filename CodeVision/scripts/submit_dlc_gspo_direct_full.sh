@@ -310,7 +310,7 @@ fi
   --vpc_id="${VPC_ID:-vpc-0jl5rpw5qokp6p2ettip6}" \
   --switch_id="${SWITCH_ID:-vsw-0jlmr9rjzed093yr9c0kz}" \
   --security_group_id="${SECURITY_GROUP_ID:-sg-0jl0pd5qaerdj75wmred}" \
-  --priority="${PRIORITY:-8}" \
+  --priority="${PRIORITY:-6}" \
   --extended_cidrs="${EXTENDED_CIDRS:-10.1.255.0/29,10.1.255.8/29,10.1.16.0/20}" \
   --advanced_settings="${ADVANCED_SETTINGS:-createSvcForAllWorkers=true,customPortList=6379;6380-6383;8265;20000-25000}" \
   --workers="${DLC_WORKERS:-2}" \
