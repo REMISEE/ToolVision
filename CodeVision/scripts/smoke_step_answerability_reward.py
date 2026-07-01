@@ -225,6 +225,32 @@ def test_repeated_judgments_mean_and_reward_scale() -> None:
         assert_close("repeated R_step", r_step, 0.04)
 
 
+def test_committee_payload_averages_successes_only() -> None:
+    client = make_client("http://unused")
+    committee = client._score_committee_payload(
+        raw_answer="",
+        raw_payload={
+            "committee_judgments": [
+                {"name": "judge_ok", "raw_answer": "<answer>cat</answer>"},
+                {"name": "judge_wrong", "raw_answer": "<answer>dog</answer>"},
+                {"name": "judge_failed", "error": "timeout", "raw_answer": ""},
+            ]
+        },
+        **{
+            "data_source": COMMON_SCORE_KWARGS["data_source"],
+            "ground_truth": COMMON_SCORE_KWARGS["ground_truth"],
+            "extra_info": COMMON_SCORE_KWARGS["extra_info"],
+        },
+    )
+    scores = [float(item["score"]) for item in committee if item.get("score") is not None]
+    assert_close("committee mean", client._aggregate_scores(scores), 0.5)
+    if len(scores) != 2:
+        raise AssertionError(f"committee valid scores={len(scores)}, expected 2")
+    failed = [item for item in committee if item.get("name") == "judge_failed"]
+    if not failed or failed[0].get("score") is not None:
+        raise AssertionError("failed committee member should not receive a score")
+
+
 def main() -> int:
     tests = [
         test_endpoint_forms,
@@ -233,6 +259,7 @@ def main() -> int:
         test_multistep_repeats_do_not_farm_reward,
         test_judge_failure_is_recorded_not_raised,
         test_repeated_judgments_mean_and_reward_scale,
+        test_committee_payload_averages_successes_only,
     ]
     for test in tests:
         test()

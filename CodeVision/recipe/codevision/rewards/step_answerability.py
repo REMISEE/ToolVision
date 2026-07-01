@@ -245,27 +245,68 @@ class StepAnswerabilityJudgeClient:
                         observation_text=observation_text,
                         images=images,
                     )
-                    final_answer = extract_answer(raw_answer) or self._clean_answer_text(raw_answer)
-                    result = compute_toolvision_score(
+                    committee_judgments = self._score_committee_payload(
+                        raw_answer=raw_answer,
+                        raw_payload=raw_payload,
                         data_source=data_source,
-                        solution_str=f"<answer>{final_answer}</answer>",
                         ground_truth=ground_truth,
                         extra_info=extra_info,
-                        extracted_answer=final_answer,
                     )
-                    if result is None:
-                        score = 0.0
+                    committee_scores = [
+                        float(item["score"])
+                        for item in committee_judgments
+                        if item.get("score") is not None
+                    ]
+                    if committee_judgments and committee_scores:
+                        first_valid_committee = next(
+                            (item for item in committee_judgments if item.get("score") is not None),
+                            committee_judgments[0],
+                        )
+                        judgment_record.update(
+                            {
+                                "score": self._aggregate_scores(committee_scores),
+                                "raw_answer": raw_answer,
+                                "final_answer": first_valid_committee.get("final_answer", ""),
+                                "usage": raw_payload.get("usage", {}) if isinstance(raw_payload, dict) else {},
+                                "committee_judgments": committee_judgments,
+                                "committee_success_count": len(committee_scores),
+                                "committee_total_count": len(
+                                    raw_payload.get("committee_judgments", [])
+                                    if isinstance(raw_payload, dict)
+                                    else []
+                                ),
+                                "error": None,
+                            }
+                        )
+                    elif committee_judgments:
+                        judgment_record.update(
+                            {
+                                "committee_judgments": committee_judgments,
+                                "committee_success_count": 0,
+                                "committee_total_count": len(
+                                    raw_payload.get("committee_judgments", [])
+                                    if isinstance(raw_payload, dict)
+                                    else []
+                                ),
+                                "error": "all committee judge calls failed",
+                            }
+                        )
                     else:
-                        score = float(result.get("score", 0.0) or 0.0)
-                    judgment_record.update(
-                        {
-                            "score": score,
-                            "raw_answer": raw_answer,
-                            "final_answer": final_answer,
-                            "usage": raw_payload.get("usage", {}) if isinstance(raw_payload, dict) else {},
-                            "error": None,
-                        }
-                    )
+                        final_answer, score = self._score_answer(
+                            raw_answer=raw_answer,
+                            data_source=data_source,
+                            ground_truth=ground_truth,
+                            extra_info=extra_info,
+                        )
+                        judgment_record.update(
+                            {
+                                "score": score,
+                                "raw_answer": raw_answer,
+                                "final_answer": final_answer,
+                                "usage": raw_payload.get("usage", {}) if isinstance(raw_payload, dict) else {},
+                                "error": None,
+                            }
+                        )
                 except Exception as exc:
                     judgment_record["error"] = str(exc)
                 judgments.append(judgment_record)
@@ -312,6 +353,90 @@ class StepAnswerabilityJudgeClient:
             return 0.0
         mean = sum(scores) / len(scores)
         return (sum((score - mean) ** 2 for score in scores) / len(scores)) ** 0.5
+
+    def _score_answer(
+        self,
+        *,
+        raw_answer: str,
+        data_source: str,
+        ground_truth: Any,
+        extra_info: dict[str, Any],
+    ) -> tuple[str, float]:
+        final_answer = extract_answer(raw_answer) or self._clean_answer_text(raw_answer)
+        result = compute_toolvision_score(
+            data_source=data_source,
+            solution_str=f"<answer>{final_answer}</answer>",
+            ground_truth=ground_truth,
+            extra_info=extra_info,
+            extracted_answer=final_answer,
+        )
+        if result is None:
+            return final_answer, 0.0
+        return final_answer, float(result.get("score", 0.0) or 0.0)
+
+    def _score_committee_payload(
+        self,
+        *,
+        raw_answer: str,
+        raw_payload: dict[str, Any],
+        data_source: str,
+        ground_truth: Any,
+        extra_info: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        if not isinstance(raw_payload, dict):
+            return []
+        raw_items = raw_payload.get("committee_judgments")
+        if not isinstance(raw_items, list):
+            return []
+
+        scored_items: list[dict[str, Any]] = []
+        for idx, item in enumerate(raw_items):
+            if not isinstance(item, dict):
+                continue
+            scored_item = dict(item)
+            scored_item.setdefault("committee_idx", idx)
+            raw_member_answer = str(
+                item.get("raw_answer")
+                or item.get("content")
+                or item.get("answer")
+                or item.get("message")
+                or ""
+            )
+            if item.get("error") or not raw_member_answer.strip():
+                scored_item.setdefault("score", None)
+                scored_item.setdefault("final_answer", "")
+                scored_items.append(scored_item)
+                continue
+            final_answer, score = self._score_answer(
+                raw_answer=raw_member_answer,
+                data_source=data_source,
+                ground_truth=ground_truth,
+                extra_info=extra_info,
+            )
+            scored_item.update(
+                {
+                    "score": score,
+                    "raw_answer": raw_member_answer,
+                    "final_answer": final_answer,
+                }
+            )
+            scored_items.append(scored_item)
+
+        valid_items = [item for item in scored_items if item.get("score") is not None]
+        if valid_items:
+            return scored_items
+
+        # Fall back to the top-level answer if a gateway returned committee metadata
+        # without usable per-member text.
+        if raw_answer.strip():
+            final_answer, score = self._score_answer(
+                raw_answer=raw_answer,
+                data_source=data_source,
+                ground_truth=ground_truth,
+                extra_info=extra_info,
+            )
+            return [{"committee_idx": 0, "score": score, "raw_answer": raw_answer, "final_answer": final_answer}]
+        return scored_items
 
     def _call_model(
         self,
