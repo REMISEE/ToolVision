@@ -15,7 +15,7 @@ from .common import extract_answer
 from .router import compute_toolvision_score
 
 
-STEP_REWARD_VERSION = "step_answerability_delta_v1"
+STEP_REWARD_VERSION = "step_answerability_context_delta_v2"
 
 
 def as_bool(value: Any, default: bool = False) -> bool:
@@ -156,8 +156,10 @@ class StepAnswerabilityConfig:
     max_retries: int = 1
     num_judgments: int = 1
     aggregation: str = "mean"
-    max_images: int = 4
-    max_observation_chars: int = 4000
+    prompt_mode: str = "context"
+    max_images: int = 8
+    max_observation_chars: int = 12000
+    max_context_chars: int = 60000
     request_body: dict[str, Any] | None = None
 
     @classmethod
@@ -177,10 +179,17 @@ class StepAnswerabilityConfig:
             max_retries=as_int(get("max_retries", os.getenv("STEP_JUDGE_MAX_RETRIES", "1")), 1),
             num_judgments=max(1, as_int(get("num_judgments", os.getenv("STEP_JUDGE_NUM_JUDGMENTS", "1")), 1)),
             aggregation=str(get("aggregation", os.getenv("STEP_JUDGE_AGGREGATION", "mean")) or "mean").strip().lower(),
-            max_images=as_int(get("max_images", os.getenv("STEP_JUDGE_MAX_IMAGES", "4")), 4),
+            prompt_mode=str(get("prompt_mode", os.getenv("STEP_JUDGE_PROMPT_MODE", "context")) or "context")
+            .strip()
+            .lower(),
+            max_images=as_int(get("max_images", os.getenv("STEP_JUDGE_MAX_IMAGES", "8")), 8),
             max_observation_chars=as_int(
-                get("max_observation_chars", os.getenv("STEP_JUDGE_MAX_OBSERVATION_CHARS", "4000")),
-                4000,
+                get("max_observation_chars", os.getenv("STEP_JUDGE_MAX_OBSERVATION_CHARS", "12000")),
+                12000,
+            ),
+            max_context_chars=as_int(
+                get("max_context_chars", os.getenv("STEP_JUDGE_MAX_CONTEXT_CHARS", "60000")),
+                60000,
             ),
             request_body=request_body,
         )
@@ -211,6 +220,8 @@ class StepAnswerabilityJudgeClient:
         state_label: str,
         observation_text: str,
         images: list[Any],
+        context_messages: list[dict[str, Any]] | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         started = time.perf_counter()
         record: dict[str, Any] = {
@@ -221,6 +232,7 @@ class StepAnswerabilityJudgeClient:
             "final_answer": "",
             "error": None,
             "latency_s": None,
+            "prompt_mode": self.config.prompt_mode,
         }
         if not self.enabled:
             record["error"] = "step answerability judge disabled or missing endpoint"
@@ -244,6 +256,8 @@ class StepAnswerabilityJudgeClient:
                         state_label=state_label,
                         observation_text=observation_text,
                         images=images,
+                        context_messages=context_messages,
+                        tools=tools,
                     )
                     committee_judgments = self._score_committee_payload(
                         raw_answer=raw_answer,
@@ -446,6 +460,8 @@ class StepAnswerabilityJudgeClient:
         state_label: str,
         observation_text: str,
         images: list[Any],
+        context_messages: list[dict[str, Any]] | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> tuple[str, dict[str, Any]]:
         api_key = os.environ.get(self.config.api_key_env, os.environ.get("OPENAI_API_KEY", "EMPTY"))
         api_root = self.config.base_url.rstrip("/")
@@ -463,6 +479,8 @@ class StepAnswerabilityJudgeClient:
                 state_label=state_label,
                 observation_text=observation_text,
                 images=images,
+                context_messages=context_messages,
+                tools=tools,
             ),
             "temperature": 0.0,
             "max_tokens": 256,
@@ -489,6 +507,33 @@ class StepAnswerabilityJudgeClient:
         raise RuntimeError(f"step answerability judge request failed: {last_error}") from last_error
 
     def _build_messages(
+        self,
+        *,
+        question: str,
+        answer_instruction: str | None,
+        state_label: str,
+        observation_text: str,
+        images: list[Any],
+        context_messages: list[dict[str, Any]] | None = None,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        if self.config.prompt_mode in {"context", "trajectory"} and context_messages:
+            return self._build_context_messages(
+                context_messages=context_messages,
+                tools=tools,
+                state_label=state_label,
+                answer_instruction=answer_instruction,
+                images=images,
+            )
+        return self._build_snapshot_messages(
+            question=question,
+            answer_instruction=answer_instruction,
+            state_label=state_label,
+            observation_text=observation_text,
+            images=images,
+        )
+
+    def _build_snapshot_messages(
         self,
         *,
         question: str,
@@ -525,6 +570,194 @@ class StepAnswerabilityJudgeClient:
             },
             {"role": "user", "content": content},
         ]
+
+    def _build_context_messages(
+        self,
+        *,
+        context_messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        state_label: str,
+        answer_instruction: str | None,
+        images: list[Any],
+    ) -> list[dict[str, Any]]:
+        image_state = self._context_image_state(images)
+        messages: list[dict[str, Any]] = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a strict visual question answering judge. You are given the original "
+                    "rollout context up to the current step. Continue from that context, do not call "
+                    "any tools, and output only one final answer inside <answer>...</answer>."
+                ),
+            }
+        ]
+        if tools:
+            tool_text = json.dumps(tools, ensure_ascii=False)
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "The following tool schemas were available to the original rollout model. "
+                        "They are provided only so you can interpret prior tool calls; you must not "
+                        f"call tools now.\n{tool_text[: self.config.max_observation_chars]}"
+                    ),
+                }
+            )
+
+        for raw_message in context_messages:
+            if not isinstance(raw_message, dict):
+                continue
+            role = str(raw_message.get("role") or "user").strip().lower()
+            if role not in {"system", "user", "assistant", "tool"}:
+                role = "user"
+            content = self._materialize_context_content(raw_message.get("content"), image_state)
+            if role == "tool":
+                content = self._prefix_tool_response(content)
+                role = "user"
+            messages.append({"role": role, "content": content})
+
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    f"State: {state_label}\n"
+                    f"Answer instruction: {answer_instruction or 'Answer concisely.'}\n"
+                    "Based only on the context above, answer the original question directly now. "
+                    "Do not call tools. Return exactly one final answer inside <answer>...</answer>."
+                ),
+            }
+        )
+        return self._truncate_context_messages(messages)
+
+    def _context_image_state(self, images: list[Any]) -> dict[str, Any]:
+        image_list = list(images or [])
+        max_images = max(1, int(self.config.max_images))
+        if len(image_list) <= max_images:
+            keep_indices = set(range(len(image_list)))
+        else:
+            keep_indices = {0, *range(len(image_list) - (max_images - 1), len(image_list))}
+        return {"images": image_list, "keep_indices": keep_indices, "idx": 0}
+
+    def _materialize_context_content(self, content: Any, image_state: dict[str, Any]) -> Any:
+        if isinstance(content, str):
+            if "<image>" not in content:
+                return content
+            converted: list[dict[str, Any]] = []
+            parts = re.split(r"(<image>)", content)
+            for part in parts:
+                if not part:
+                    continue
+                if part == "<image>":
+                    encoded = self._encode_next_context_image(image_state)
+                    if encoded:
+                        converted.append({"type": "image_url", "image_url": {"url": encoded}})
+                    continue
+                converted.append({"type": "text", "text": part})
+            return converted
+        if isinstance(content, list):
+            converted: list[dict[str, Any]] = []
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                item_type = item.get("type")
+                if item_type == "text":
+                    converted.append({"type": "text", "text": str(item.get("text", ""))})
+                elif item_type == "image_url":
+                    converted.append(item)
+                elif item_type == "image":
+                    encoded = self._encode_next_context_image(image_state)
+                    if encoded:
+                        converted.append({"type": "image_url", "image_url": {"url": encoded}})
+                elif item_type:
+                    converted.append({"type": "text", "text": f"[Unsupported content type: {item_type}]"})
+            return converted
+        return str(content or "")
+
+    def _prefix_tool_response(self, content: Any) -> Any:
+        prefix = {"type": "text", "text": "Tool response from the current rollout context:"}
+        if isinstance(content, list):
+            return [prefix, *content]
+        text = str(content or "")
+        return f"Tool response from the current rollout context:\n{text}"
+
+    def _encode_next_context_image(self, image_state: dict[str, Any]) -> str:
+        try:
+            idx = int(image_state.get("idx", 0))
+            image_state["idx"] = idx + 1
+            images = image_state.get("images") or []
+            keep_indices = image_state.get("keep_indices") or set()
+            if idx not in keep_indices or idx >= len(images):
+                return ""
+            return self._encode_image(images[idx])
+        except Exception:
+            return ""
+
+    def _truncate_context_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        budget = max(1000, int(self.config.max_context_chars))
+        if self._messages_text_chars(messages) <= budget:
+            return messages
+
+        # Keep the judge system instruction and the final direct-answer request,
+        # then fill remaining budget with the original prompt and latest context.
+        head = messages[:1]
+        tail = messages[-1:]
+        middle = messages[1:-1]
+        remaining = max(0, budget - self._messages_text_chars(head) - self._messages_text_chars(tail))
+        kept: list[dict[str, Any]] = []
+        for message in reversed(middle):
+            msg_chars = self._messages_text_chars([message])
+            if msg_chars <= remaining:
+                kept.append(message)
+                remaining -= msg_chars
+                continue
+            if remaining > 1000:
+                kept.append(self._clip_message_text(message, remaining, keep_suffix=True))
+                remaining = 0
+            break
+        kept.reverse()
+        return head + [{"role": "system", "content": "[Earlier rollout context was truncated for judge input length.]"}] + kept + tail
+
+    def _messages_text_chars(self, messages: list[dict[str, Any]]) -> int:
+        total = 0
+        for message in messages:
+            content = message.get("content")
+            if isinstance(content, str):
+                total += len(content)
+            elif isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        total += len(str(item.get("text", "")))
+        return total
+
+    def _clip_message_text(self, message: dict[str, Any], limit: int, *, keep_suffix: bool) -> dict[str, Any]:
+        clipped = dict(message)
+        content = clipped.get("content")
+        if isinstance(content, str):
+            clipped["content"] = self._clip_text(content, limit, keep_suffix=keep_suffix)
+        elif isinstance(content, list):
+            out = []
+            remaining = limit
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") != "text":
+                    out.append(item)
+                    continue
+                text = str(item.get("text", ""))
+                clipped_text = self._clip_text(text, remaining, keep_suffix=keep_suffix)
+                out.append({"type": "text", "text": clipped_text})
+                remaining = max(0, remaining - len(clipped_text))
+            clipped["content"] = out
+        return clipped
+
+    def _clip_text(self, text: str, limit: int, *, keep_suffix: bool) -> str:
+        if len(text) <= limit:
+            return text
+        marker = "\n[...truncated...]\n"
+        keep = max(0, limit - len(marker))
+        if keep_suffix:
+            return marker + text[-keep:]
+        return text[:keep] + marker
 
     def _select_images(self, images: list[Any]) -> list[Any]:
         if not images:

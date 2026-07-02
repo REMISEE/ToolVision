@@ -13,6 +13,8 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from PIL import Image
+
 from recipe.codevision.rewards.step_answerability import (
     StepAnswerabilityJudgeClient,
     compute_step_answerability_delta,
@@ -251,6 +253,38 @@ def test_committee_payload_averages_successes_only() -> None:
         raise AssertionError("failed committee member should not receive a score")
 
 
+def test_context_prompt_contains_rollout_history_without_gt() -> None:
+    client = make_client("http://unused", prompt_mode="context", max_context_chars=20000)
+    messages = client._build_messages(
+        question="What code is visible?",
+        answer_instruction="Answer with the code only.",
+        state_label="after_tool_step_1",
+        observation_text="legacy snapshot observation",
+        images=[Image.new("RGB", (32, 32), "white")],
+        tools=[{"type": "function", "function": {"name": "code_image_tool"}}],
+        context_messages=[
+            {"role": "system", "content": "System prompt with tool-use policy."},
+            {"role": "user", "content": "<image>What code is visible?"},
+            {
+                "role": "assistant",
+                "content": "<think>I should crop the label.</think><tool_call>{\"name\":\"code_image_tool\"}</tool_call>",
+            },
+            {"role": "tool", "content": "OCR crop result says AX-17."},
+        ],
+    )
+    payload_text = json.dumps(messages, ensure_ascii=False)
+    required = ["System prompt with tool-use policy", "code_image_tool", "<tool_call>", "OCR crop result says AX-17"]
+    for item in required:
+        if item not in payload_text:
+            raise AssertionError(f"context prompt missing {item!r}: {payload_text[:500]}")
+    if "image_url" not in payload_text:
+        raise AssertionError("context prompt did not materialize string <image> placeholder")
+    if "cat" in payload_text:
+        raise AssertionError("ground truth leaked into context prompt")
+    if any(message.get("role") == "tool" for message in messages):
+        raise AssertionError("context prompt should normalize tool role for OpenAI-compatible APIs")
+
+
 def main() -> int:
     tests = [
         test_endpoint_forms,
@@ -260,6 +294,7 @@ def main() -> int:
         test_judge_failure_is_recorded_not_raised,
         test_repeated_judgments_mean_and_reward_scale,
         test_committee_payload_averages_successes_only,
+        test_context_prompt_contains_rollout_history_without_gt,
     ]
     for test in tests:
         test()

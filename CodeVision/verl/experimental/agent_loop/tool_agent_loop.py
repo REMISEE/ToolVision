@@ -90,6 +90,7 @@ class AgentData:
         interaction_kwargs: Optional[dict[str, Any]] = None,
     ):
         self.messages = messages
+        self.initial_messages = copy.deepcopy(messages)
         self.image_data = image_data
         self.orgin_image_data = orgin_image_data
         self.initial_origin_image_data = copy.deepcopy(orgin_image_data)
@@ -401,13 +402,11 @@ class ToolAgentLoop(AgentLoopBase):
         # Extract tool calls
         _, agent_data.tool_calls = await self.tool_parser.extract_tool_calls(agent_data.response_ids)
 
-        # Handle interaction if needed
-        if self.interaction_config_file:
-            assistant_message = await self.loop.run_in_executor(
-                None, lambda: self.tokenizer.decode(agent_data.response_ids)
-            )
-            add_messages.append({"role": "assistant", "content": assistant_message})
-            agent_data.messages.extend(add_messages)
+        assistant_message = await self.loop.run_in_executor(
+            None, lambda: self.tokenizer.decode(agent_data.response_ids)
+        )
+        add_messages.append({"role": "assistant", "content": assistant_message})
+        agent_data.messages.extend(add_messages)
 
         # Determine next state
         if agent_data.tool_calls:
@@ -631,6 +630,8 @@ class ToolAgentLoop(AgentLoopBase):
                     state_label="baseline_before_tools",
                     observation_text="No tool has been used yet.",
                     images=self._normalize_images(agent_data.initial_origin_image_data),
+                    context_messages=copy.deepcopy(agent_data.initial_messages),
+                    tools=copy.deepcopy(self.tool_schemas),
                 ),
             )
             agent_data.step_answerability_records.append(baseline_record)
@@ -651,6 +652,8 @@ class ToolAgentLoop(AgentLoopBase):
                 state_label=f"after_tool_step_{step_idx}",
                 observation_text=observation_text,
                 images=self._normalize_images(agent_data.orgin_image_data),
+                context_messages=copy.deepcopy(agent_data.messages),
+                tools=copy.deepcopy(self.tool_schemas),
             ),
         )
         agent_data.step_answerability_records.append(step_record)
