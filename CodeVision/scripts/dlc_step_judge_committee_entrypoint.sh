@@ -54,6 +54,11 @@ COMMITTEE_TEMPERATURE_B="${COMMITTEE_TEMPERATURE_B:-0.3}"
 COMMITTEE_MAX_WORKERS="${COMMITTEE_MAX_WORKERS:-12}"
 COMMITTEE_TIMEOUT_S="${COMMITTEE_TIMEOUT_S:-120}"
 COMMITTEE_MAX_RETRIES="${COMMITTEE_MAX_RETRIES:-0}"
+COMMITTEE_REQUIRE_ALL="${COMMITTEE_REQUIRE_ALL:-0}"
+COMMITTEE_MAX_INFLIGHT_REQUESTS="${COMMITTEE_MAX_INFLIGHT_REQUESTS:-0}"
+COMMITTEE_LOCAL_MAX_CONCURRENCY="${COMMITTEE_LOCAL_MAX_CONCURRENCY:-0}"
+COMMITTEE_32B_MAX_CONCURRENCY="${COMMITTEE_32B_MAX_CONCURRENCY:-${COMMITTEE_LOCAL_MAX_CONCURRENCY}}"
+COMMITTEE_API_MAX_CONCURRENCY="${COMMITTEE_API_MAX_CONCURRENCY:-0}"
 COMMITTEE_INCLUDE_8B_TEST="${COMMITTEE_INCLUDE_8B_TEST:-0}"
 
 COMMITTEE_API1_NAME="${COMMITTEE_API1_NAME:-qwen36plus_api}"
@@ -72,7 +77,9 @@ JUDGE_WARMUP_TIMEOUT_S="${JUDGE_WARMUP_TIMEOUT_S:-1800}"
 JUDGE_KEEPALIVE_SECONDS="${JUDGE_KEEPALIVE_SECONDS:-300}"
 SKIP_JUDGE_WARMUP="${SKIP_JUDGE_WARMUP:-0}"
 JUDGE_VLLM_EXTRA_ARGS_COMMON="${JUDGE_VLLM_EXTRA_ARGS_COMMON:-}"
+JUDGE_VLLM_EXTRA_ARGS_SMALL="${JUDGE_VLLM_EXTRA_ARGS_SMALL:-}"
 JUDGE_VLLM_EXTRA_ARGS_32B="${JUDGE_VLLM_EXTRA_ARGS_32B:-}"
+VLLM_USE_V1="${VLLM_USE_V1:-}"
 
 export JUDGE_MODEL_2B_NAME JUDGE_MODEL_4B_NAME JUDGE_MODEL_8B_NAME
 export JUDGE_MODEL_32B_NAME JUDGE_MODEL_8B_TEST_NAME
@@ -80,6 +87,8 @@ export JUDGE_PORT_2B JUDGE_PORT_4B JUDGE_PORT_8B JUDGE_PORT_32B JUDGE_PORT_8B_TE
 export JUDGE_LOCAL_API_KEY
 export COMMITTEE_TEMPERATURE_A COMMITTEE_TEMPERATURE_B
 export COMMITTEE_TIMEOUT_S COMMITTEE_MAX_RETRIES
+export COMMITTEE_REQUIRE_ALL COMMITTEE_MAX_INFLIGHT_REQUESTS
+export COMMITTEE_LOCAL_MAX_CONCURRENCY COMMITTEE_32B_MAX_CONCURRENCY COMMITTEE_API_MAX_CONCURRENCY
 export COMMITTEE_INCLUDE_8B_TEST
 export COMMITTEE_API1_NAME COMMITTEE_API1_BASE_URL COMMITTEE_API1_MODEL COMMITTEE_API1_API_KEY COMMITTEE_API1_REQUEST_BODY
 export COMMITTEE_API2_NAME COMMITTEE_API2_BASE_URL COMMITTEE_API2_MODEL COMMITTEE_API2_API_KEY COMMITTEE_API2_REQUEST_BODY
@@ -131,6 +140,9 @@ start_vllm() {
   (
     export CUDA_VISIBLE_DEVICES="${gpu_group}"
     export VLLM_WORKER_MULTIPROC_METHOD="${VLLM_WORKER_MULTIPROC_METHOD:-spawn}"
+    if [[ -n "${VLLM_USE_V1}" ]]; then
+      export VLLM_USE_V1
+    fi
     if ! command -v vllm >/dev/null 2>&1; then
       echo "vllm is not available in PATH; use an image/env that includes vLLM." >&2
       exit 127
@@ -182,6 +194,9 @@ temp_a = float(os.environ.get("COMMITTEE_TEMPERATURE_A", "0.2"))
 temp_b = float(os.environ.get("COMMITTEE_TEMPERATURE_B", "0.3"))
 timeout_s = float(os.environ.get("COMMITTEE_TIMEOUT_S", "120"))
 max_retries = int(os.environ.get("COMMITTEE_MAX_RETRIES", "0"))
+local_max_concurrency = int(os.environ.get("COMMITTEE_LOCAL_MAX_CONCURRENCY", "0") or 0)
+max_concurrency_32b = int(os.environ.get("COMMITTEE_32B_MAX_CONCURRENCY", str(local_max_concurrency)) or 0)
+api_max_concurrency = int(os.environ.get("COMMITTEE_API_MAX_CONCURRENCY", "0") or 0)
 members = []
 
 
@@ -207,7 +222,7 @@ def parse_request_body(env_name):
         return parsed
 
 
-def add_pair(name, base_url, model, api_key_env, request_body=None):
+def add_pair(name, base_url, model, api_key_env, request_body=None, max_concurrency=0):
     for suffix, temperature in (("a", temp_a), ("b", temp_b)):
         members.append(
             {
@@ -219,17 +234,19 @@ def add_pair(name, base_url, model, api_key_env, request_body=None):
                 "timeout_s": timeout_s,
                 "max_retries": max_retries,
                 "request_body": request_body or {"max_tokens": 256},
+                "concurrency_group": name,
+                "max_concurrency": max(0, int(max_concurrency or 0)),
             }
         )
 
 
-add_pair("qwen3_vl_2b", f"http://127.0.0.1:{os.environ['JUDGE_PORT_2B']}/v1", os.environ["JUDGE_MODEL_2B_NAME"], "JUDGE_LOCAL_API_KEY")
-add_pair("qwen3_vl_4b", f"http://127.0.0.1:{os.environ['JUDGE_PORT_4B']}/v1", os.environ["JUDGE_MODEL_4B_NAME"], "JUDGE_LOCAL_API_KEY")
-add_pair("qwen3_vl_8b", f"http://127.0.0.1:{os.environ['JUDGE_PORT_8B']}/v1", os.environ["JUDGE_MODEL_8B_NAME"], "JUDGE_LOCAL_API_KEY")
-add_pair("qwen3_vl_32b", f"http://127.0.0.1:{os.environ['JUDGE_PORT_32B']}/v1", os.environ["JUDGE_MODEL_32B_NAME"], "JUDGE_LOCAL_API_KEY")
+add_pair("qwen3_vl_2b", f"http://127.0.0.1:{os.environ['JUDGE_PORT_2B']}/v1", os.environ["JUDGE_MODEL_2B_NAME"], "JUDGE_LOCAL_API_KEY", max_concurrency=local_max_concurrency)
+add_pair("qwen3_vl_4b", f"http://127.0.0.1:{os.environ['JUDGE_PORT_4B']}/v1", os.environ["JUDGE_MODEL_4B_NAME"], "JUDGE_LOCAL_API_KEY", max_concurrency=local_max_concurrency)
+add_pair("qwen3_vl_8b", f"http://127.0.0.1:{os.environ['JUDGE_PORT_8B']}/v1", os.environ["JUDGE_MODEL_8B_NAME"], "JUDGE_LOCAL_API_KEY", max_concurrency=local_max_concurrency)
+add_pair("qwen3_vl_32b", f"http://127.0.0.1:{os.environ['JUDGE_PORT_32B']}/v1", os.environ["JUDGE_MODEL_32B_NAME"], "JUDGE_LOCAL_API_KEY", max_concurrency=max_concurrency_32b)
 
 if os.environ.get("COMMITTEE_INCLUDE_8B_TEST", "0").lower() in {"1", "true", "yes", "on"}:
-    add_pair("qwen3_vl_8b_test", f"http://127.0.0.1:{os.environ['JUDGE_PORT_8B_TEST']}/v1", os.environ["JUDGE_MODEL_8B_TEST_NAME"], "JUDGE_LOCAL_API_KEY")
+    add_pair("qwen3_vl_8b_test", f"http://127.0.0.1:{os.environ['JUDGE_PORT_8B_TEST']}/v1", os.environ["JUDGE_MODEL_8B_TEST_NAME"], "JUDGE_LOCAL_API_KEY", max_concurrency=local_max_concurrency)
 
 api1_key = os.environ.get("COMMITTEE_API1_API_KEY", "")
 if api1_key and os.environ.get("COMMITTEE_API1_BASE_URL") and os.environ.get("COMMITTEE_API1_MODEL"):
@@ -240,6 +257,7 @@ if api1_key and os.environ.get("COMMITTEE_API1_BASE_URL") and os.environ.get("CO
         os.environ["COMMITTEE_API1_MODEL"],
         "COMMITTEE_API1_API_KEY_RUNTIME",
         parse_request_body("COMMITTEE_API1_REQUEST_BODY"),
+        max_concurrency=api_max_concurrency,
     )
 
 api2_key = os.environ.get("COMMITTEE_API2_API_KEY", "")
@@ -251,6 +269,7 @@ if api2_key and os.environ.get("COMMITTEE_API2_BASE_URL") and os.environ.get("CO
         os.environ["COMMITTEE_API2_MODEL"],
         "COMMITTEE_API2_API_KEY_RUNTIME",
         parse_request_body("COMMITTEE_API2_REQUEST_BODY"),
+        max_concurrency=api_max_concurrency,
     )
 
 print(json.dumps(members, ensure_ascii=False))
@@ -265,6 +284,8 @@ start_gateway() {
   export COMMITTEE_MODEL_NAME
   export COMMITTEE_API_KEY
   export COMMITTEE_MAX_WORKERS
+  export COMMITTEE_REQUIRE_ALL
+  export COMMITTEE_MAX_INFLIGHT_REQUESTS
   export COMMITTEE_TIMEOUT_S
   export COMMITTEE_MAX_RETRIES
   export COMMITTEE_LOG_JSONL="${COMMITTEE_LOG_JSONL:-${JUDGE_OUTPUT_ROOT}/logs/committee_requests.jsonl}"
@@ -300,11 +321,11 @@ echo "GPU layout: 2B=${JUDGE_GPU_2B}, 4B=${JUDGE_GPU_4B}, 8B=${JUDGE_GPU_8B}, 32
 echo "Ports: 2B=${JUDGE_PORT_2B}, 4B=${JUDGE_PORT_4B}, 8B=${JUDGE_PORT_8B}, 32B=${JUDGE_PORT_32B}, 8B-test=${JUDGE_PORT_8B_TEST}, gateway=${COMMITTEE_PORT}"
 echo "API members: api1=$([[ -n "${COMMITTEE_API1_API_KEY}" ]] && echo enabled || echo disabled), api2=$([[ -n "${COMMITTEE_API2_API_KEY}" ]] && echo enabled || echo disabled)"
 
-start_vllm "qwen3_vl_2b" "${JUDGE_MODEL_2B_PATH}" "${JUDGE_MODEL_2B_NAME}" "${JUDGE_PORT_2B}" "${JUDGE_GPU_2B}" 1 "${JUDGE_MAX_MODEL_LEN_SMALL}" "${JUDGE_GPU_MEMORY_UTILIZATION_SMALL}" ""
-start_vllm "qwen3_vl_4b" "${JUDGE_MODEL_4B_PATH}" "${JUDGE_MODEL_4B_NAME}" "${JUDGE_PORT_4B}" "${JUDGE_GPU_4B}" 1 "${JUDGE_MAX_MODEL_LEN_SMALL}" "${JUDGE_GPU_MEMORY_UTILIZATION_SMALL}" ""
-start_vllm "qwen3_vl_8b" "${JUDGE_MODEL_8B_PATH}" "${JUDGE_MODEL_8B_NAME}" "${JUDGE_PORT_8B}" "${JUDGE_GPU_8B}" 1 "${JUDGE_MAX_MODEL_LEN_SMALL}" "${JUDGE_GPU_MEMORY_UTILIZATION_SMALL}" ""
+start_vllm "qwen3_vl_2b" "${JUDGE_MODEL_2B_PATH}" "${JUDGE_MODEL_2B_NAME}" "${JUDGE_PORT_2B}" "${JUDGE_GPU_2B}" 1 "${JUDGE_MAX_MODEL_LEN_SMALL}" "${JUDGE_GPU_MEMORY_UTILIZATION_SMALL}" "${JUDGE_VLLM_EXTRA_ARGS_SMALL}"
+start_vllm "qwen3_vl_4b" "${JUDGE_MODEL_4B_PATH}" "${JUDGE_MODEL_4B_NAME}" "${JUDGE_PORT_4B}" "${JUDGE_GPU_4B}" 1 "${JUDGE_MAX_MODEL_LEN_SMALL}" "${JUDGE_GPU_MEMORY_UTILIZATION_SMALL}" "${JUDGE_VLLM_EXTRA_ARGS_SMALL}"
+start_vllm "qwen3_vl_8b" "${JUDGE_MODEL_8B_PATH}" "${JUDGE_MODEL_8B_NAME}" "${JUDGE_PORT_8B}" "${JUDGE_GPU_8B}" 1 "${JUDGE_MAX_MODEL_LEN_SMALL}" "${JUDGE_GPU_MEMORY_UTILIZATION_SMALL}" "${JUDGE_VLLM_EXTRA_ARGS_SMALL}"
 start_vllm "qwen3_vl_32b" "${JUDGE_MODEL_32B_PATH}" "${JUDGE_MODEL_32B_NAME}" "${JUDGE_PORT_32B}" "${JUDGE_GPU_32B}" "${JUDGE_TP_32B}" "${JUDGE_MAX_MODEL_LEN_32B}" "${JUDGE_GPU_MEMORY_UTILIZATION_32B}" "${JUDGE_VLLM_EXTRA_ARGS_32B}"
-start_vllm "qwen3_vl_8b_test" "${JUDGE_MODEL_8B_PATH}" "${JUDGE_MODEL_8B_TEST_NAME}" "${JUDGE_PORT_8B_TEST}" "${JUDGE_GPU_8B_TEST}" 1 "${JUDGE_MAX_MODEL_LEN_SMALL}" "${JUDGE_GPU_MEMORY_UTILIZATION_SMALL}" ""
+start_vllm "qwen3_vl_8b_test" "${JUDGE_MODEL_8B_PATH}" "${JUDGE_MODEL_8B_TEST_NAME}" "${JUDGE_PORT_8B_TEST}" "${JUDGE_GPU_8B_TEST}" 1 "${JUDGE_MAX_MODEL_LEN_SMALL}" "${JUDGE_GPU_MEMORY_UTILIZATION_SMALL}" "${JUDGE_VLLM_EXTRA_ARGS_SMALL}"
 
 export COMMITTEE_API1_API_KEY_RUNTIME="${COMMITTEE_API1_API_KEY}"
 export COMMITTEE_API2_API_KEY_RUNTIME="${COMMITTEE_API2_API_KEY}"

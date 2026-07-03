@@ -11,6 +11,7 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import os
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -84,6 +85,8 @@ class JudgeMember:
     max_retries: int = 0
     enabled: bool = True
     request_body: dict[str, Any] | None = None
+    concurrency_group: str = ""
+    max_concurrency: int = 0
 
     @classmethod
     def from_mapping(cls, item: dict[str, Any]) -> "JudgeMember":
@@ -103,6 +106,8 @@ class JudgeMember:
             max_retries=as_int(item.get("max_retries"), as_int(os.getenv("COMMITTEE_MAX_RETRIES"), 0)),
             enabled=as_bool(item.get("enabled", True), True),
             request_body=dict(request_body or {}),
+            concurrency_group=str(item.get("concurrency_group") or "").strip(),
+            max_concurrency=max(0, as_int(item.get("max_concurrency"), 0)),
         )
 
     @property
@@ -124,14 +129,48 @@ class CommitteeGateway:
         self.api_key = os.getenv("COMMITTEE_API_KEY", "").strip()
         self.max_workers = max(1, as_int(os.getenv("COMMITTEE_MAX_WORKERS"), max(1, len(self.members))))
         self.min_successes = max(1, as_int(os.getenv("COMMITTEE_MIN_SUCCESSES"), 1))
+        self.require_all = as_bool(os.getenv("COMMITTEE_REQUIRE_ALL"), False)
         self.default_temperature = as_float(os.getenv("COMMITTEE_DEFAULT_TEMPERATURE"), 0.25)
         self.log_path = os.getenv("COMMITTEE_LOG_JSONL", "").strip()
+        self.max_inflight_requests = max(0, as_int(os.getenv("COMMITTEE_MAX_INFLIGHT_REQUESTS"), 0))
+        self.request_semaphore = self._build_request_semaphore()
+        self.group_semaphores = self._build_group_semaphores()
+
+    def _build_request_semaphore(self) -> threading.BoundedSemaphore | None:
+        if self.max_inflight_requests <= 0:
+            return None
+        return threading.BoundedSemaphore(self.max_inflight_requests)
+
+    def _build_group_semaphores(self) -> dict[str, threading.BoundedSemaphore]:
+        limits: dict[str, int] = {}
+        for member in self.members:
+            group = self._member_group(member)
+            if member.max_concurrency <= 0:
+                continue
+            if group in limits:
+                limits[group] = min(limits[group], member.max_concurrency)
+            else:
+                limits[group] = member.max_concurrency
+        return {group: threading.BoundedSemaphore(limit) for group, limit in limits.items() if limit > 0}
+
+    def _member_group(self, member: JudgeMember) -> str:
+        return member.concurrency_group or member.base_url.rstrip("/")
 
     def check_auth(self, headers: Any) -> bool:
         if not self.api_key:
             return True
         auth = str(headers.get("Authorization", ""))
         return auth == f"Bearer {self.api_key}"
+
+    def call_member_bounded(self, member: JudgeMember, request_body: dict[str, Any]) -> dict[str, Any]:
+        semaphore = self.group_semaphores.get(self._member_group(member))
+        if semaphore is None:
+            return self.call_member(member, request_body)
+        semaphore.acquire()
+        try:
+            return self.call_member(member, request_body)
+        finally:
+            semaphore.release()
 
     def call_member(self, member: JudgeMember, request_body: dict[str, Any]) -> dict[str, Any]:
         started = time.perf_counter()
@@ -180,16 +219,26 @@ class CommitteeGateway:
         }
 
     def chat_completions(self, request_body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        if self.request_semaphore is not None:
+            self.request_semaphore.acquire()
+        try:
+            return self._chat_completions_inner(request_body)
+        finally:
+            if self.request_semaphore is not None:
+                self.request_semaphore.release()
+
+    def _chat_completions_inner(self, request_body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         started = time.perf_counter()
         if not self.members:
             return 503, {"error": {"message": "committee has no enabled judge members"}}
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            futures = [executor.submit(self.call_member, member, request_body) for member in self.members]
+            futures = [executor.submit(self.call_member_bounded, member, request_body) for member in self.members]
             judgments = [future.result() for future in concurrent.futures.as_completed(futures)]
         judgments.sort(key=lambda item: item.get("name", ""))
         successes = [item for item in judgments if item.get("success") and str(item.get("content", "")).strip()]
-        status = 200 if len(successes) >= self.min_successes else 502
+        required_successes = len(self.members) if self.require_all else self.min_successes
+        status = 200 if len(successes) >= required_successes else 502
         content = str(successes[0].get("content", "")) if successes else ""
         usage = self._merge_usage([item.get("usage", {}) for item in successes])
 
@@ -209,6 +258,7 @@ class CommitteeGateway:
             "committee_judgments": judgments,
             "committee_success_count": len(successes),
             "committee_total_count": len(judgments),
+            "committee_required_success_count": required_successes,
             "committee_latency_s": round(time.perf_counter() - started, 3),
         }
         if status != 200:
@@ -220,8 +270,18 @@ class CommitteeGateway:
         return {
             "status": "ok",
             "model": self.model_name,
+            "require_all": self.require_all,
+            "max_workers": self.max_workers,
+            "max_inflight_requests": self.max_inflight_requests,
+            "bounded_groups": sorted(self.group_semaphores),
             "members": [
-                {"name": member.name, "model": member.model, "base_url": member.base_url}
+                {
+                    "name": member.name,
+                    "model": member.model,
+                    "base_url": member.base_url,
+                    "concurrency_group": self._member_group(member),
+                    "max_concurrency": member.max_concurrency,
+                }
                 for member in self.members
             ],
         }
@@ -257,6 +317,7 @@ class CommitteeGateway:
                 "created": response.get("created"),
                 "success_count": response.get("committee_success_count"),
                 "total_count": response.get("committee_total_count"),
+                "required_success_count": response.get("committee_required_success_count"),
                 "latency_s": response.get("committee_latency_s"),
                 "members": [
                     {
