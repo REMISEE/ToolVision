@@ -284,8 +284,8 @@ def main() -> None:
     parser.add_argument("--gateway-model", default="step-judge-committee")
     parser.add_argument("--poll-s", type=float, default=30)
     parser.add_argument("--max-wait-s", type=float, default=48 * 3600)
-    parser.add_argument("--direct-levels", default="1,2,4,8,16")
-    parser.add_argument("--gateway-levels", default="1,2,4")
+    parser.add_argument("--direct-levels", default="1,2,4,8,16,32")
+    parser.add_argument("--gateway-levels", default="1,2,4,8,16,32")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)

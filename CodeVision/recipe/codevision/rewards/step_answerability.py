@@ -15,7 +15,7 @@ from .common import extract_answer
 from .router import compute_toolvision_score
 
 
-STEP_REWARD_VERSION = "step_answerability_context_delta_v2"
+STEP_REWARD_VERSION = "step_answerability_context_delta_v3"
 
 
 def as_bool(value: Any, default: bool = False) -> bool:
@@ -110,7 +110,20 @@ def compute_step_answerability_delta(
 
     v0 = numeric_scores[0]
     if v0 is None:
-        v0 = 0.0
+        step_scores = [None if item is None else float(item) for item in numeric_scores[1:]]
+        scored_count = sum(1 for item in numeric_scores[1:] if item is not None)
+        return {
+            "v0": None,
+            "step_scores": step_scores,
+            "step_gains": [0.0] * step_count,
+            "raw_delta": 0.0,
+            "capped_delta": 0.0,
+            "best_score": None,
+            "scored_count": scored_count,
+            "valid_count": 0,
+            "missing_baseline": True,
+            "version": STEP_REWARD_VERSION,
+        }
     best_score = float(v0)
     gains: list[float] = []
     raw_delta = 0.0
@@ -142,6 +155,7 @@ def compute_step_answerability_delta(
         "best_score": best_score,
         "scored_count": scored_count,
         "valid_count": valid_count,
+        "missing_baseline": False,
         "version": STEP_REWARD_VERSION,
     }
 
@@ -272,18 +286,22 @@ class StepAnswerabilityJudgeClient:
                         if item.get("score") is not None
                     ]
                     if committee_judgments and committee_scores:
+                        committee_score, committee_score_meta = self._aggregate_committee_scores(committee_judgments)
                         first_valid_committee = next(
                             (item for item in committee_judgments if item.get("score") is not None),
                             committee_judgments[0],
                         )
                         judgment_record.update(
                             {
-                                "score": self._aggregate_scores(committee_scores),
+                                "score": committee_score,
                                 "raw_answer": raw_answer,
                                 "final_answer": first_valid_committee.get("final_answer", ""),
                                 "usage": raw_payload.get("usage", {}) if isinstance(raw_payload, dict) else {},
                                 "committee_judgments": committee_judgments,
                                 "committee_success_count": len(committee_scores),
+                                "committee_success_group_count": committee_score_meta.get("success_group_count", 0),
+                                "committee_group_scores": committee_score_meta.get("group_scores", {}),
+                                "committee_aggregation": committee_score_meta.get("aggregation", self.config.aggregation),
                                 "committee_total_count": len(
                                     raw_payload.get("committee_judgments", [])
                                     if isinstance(raw_payload, dict)
@@ -361,6 +379,41 @@ class StepAnswerabilityJudgeClient:
         if mode == "min":
             return min(scores)
         return sum(scores) / len(scores)
+
+    def _aggregate_committee_scores(self, items: list[dict[str, Any]]) -> tuple[float, dict[str, Any]]:
+        valid_items = [item for item in items if item.get("score") is not None]
+        scores = [float(item["score"]) for item in valid_items]
+        mode = self.config.aggregation
+        if mode not in {"group_mean", "grouped_mean", "committee_group_mean"}:
+            return self._aggregate_scores(scores), {
+                "aggregation": mode,
+                "success_group_count": 0,
+                "group_scores": {},
+            }
+
+        grouped: dict[str, list[float]] = {}
+        for item in valid_items:
+            group = str(
+                item.get("score_group")
+                or item.get("concurrency_group")
+                or item.get("model")
+                or item.get("name")
+                or "judge"
+            )
+            grouped.setdefault(group, []).append(float(item["score"]))
+        group_scores = {
+            group: sum(values) / len(values)
+            for group, values in sorted(grouped.items())
+            if values
+        }
+        if not group_scores:
+            return 0.0, {"aggregation": mode, "success_group_count": 0, "group_scores": {}}
+        score = sum(group_scores.values()) / len(group_scores)
+        return score, {
+            "aggregation": mode,
+            "success_group_count": len(group_scores),
+            "group_scores": group_scores,
+        }
 
     def _score_std(self, scores: list[float]) -> float:
         if len(scores) <= 1:

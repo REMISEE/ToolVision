@@ -179,6 +179,14 @@ def test_invalid_step_gets_no_positive_gain() -> None:
         raise AssertionError(f"invalid step valid_count={delta['valid_count']}, expected 0")
 
 
+def test_missing_baseline_gets_no_positive_gain() -> None:
+    delta = compute_step_answerability_delta([None, 1.0, 1.0], [True, True], tau=0.1, cap=0.5)
+    assert_close("missing baseline raw", delta["raw_delta"], 0.0)
+    assert_close("missing baseline capped", delta["capped_delta"], 0.0)
+    if not delta.get("missing_baseline"):
+        raise AssertionError("missing baseline should be explicit")
+
+
 def test_multistep_repeats_do_not_farm_reward() -> None:
     delta = compute_step_answerability_delta([0.0, 0.7, 0.75, 0.75, 1.0], [True, True, True, True], tau=0.1, cap=1.0)
     assert_close("multistep gain 0", delta["step_gains"][0], 0.6)
@@ -253,6 +261,34 @@ def test_committee_payload_averages_successes_only() -> None:
         raise AssertionError("failed committee member should not receive a score")
 
 
+def test_committee_group_mean_weights_model_groups_once() -> None:
+    client = make_client("http://unused", aggregation="group_mean")
+    committee = client._score_committee_payload(
+        raw_answer="",
+        raw_payload={
+            "committee_judgments": [
+                {"name": "qwen3_vl_2b_a", "score_group": "qwen3_vl_2b", "raw_answer": "<answer>dog</answer>"},
+                {"name": "qwen3_vl_2b_b", "score_group": "qwen3_vl_2b", "raw_answer": "<answer>dog</answer>"},
+                {"name": "qwen3_vl_32b_a", "score_group": "qwen3_vl_32b", "raw_answer": "<answer>cat</answer>"},
+                {"name": "api_failed", "score_group": "qwen36plus_api", "error": "timeout", "raw_answer": ""},
+            ]
+        },
+        **{
+            "data_source": COMMON_SCORE_KWARGS["data_source"],
+            "ground_truth": COMMON_SCORE_KWARGS["ground_truth"],
+            "extra_info": COMMON_SCORE_KWARGS["extra_info"],
+        },
+    )
+    score, meta = client._aggregate_committee_scores(committee)
+    assert_close("committee group mean", score, 0.5)
+    if meta.get("success_group_count") != 2:
+        raise AssertionError(f"group count={meta.get('success_group_count')}, expected 2")
+    if meta.get("group_scores", {}).get("qwen3_vl_2b") != 0.0:
+        raise AssertionError(f"2b group score={meta.get('group_scores')}")
+    if meta.get("group_scores", {}).get("qwen3_vl_32b") != 1.0:
+        raise AssertionError(f"32b group score={meta.get('group_scores')}")
+
+
 def test_context_prompt_contains_rollout_history_without_gt() -> None:
     client = make_client("http://unused", prompt_mode="context", max_context_chars=20000)
     messages = client._build_messages(
@@ -290,10 +326,12 @@ def main() -> int:
         test_endpoint_forms,
         test_no_improvement_gets_zero,
         test_invalid_step_gets_no_positive_gain,
+        test_missing_baseline_gets_no_positive_gain,
         test_multistep_repeats_do_not_farm_reward,
         test_judge_failure_is_recorded_not_raised,
         test_repeated_judgments_mean_and_reward_scale,
         test_committee_payload_averages_successes_only,
+        test_committee_group_mean_weights_model_groups_once,
         test_context_prompt_contains_rollout_history_without_gt,
     ]
     for test in tests:

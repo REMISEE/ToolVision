@@ -319,6 +319,7 @@ class ToolAgentLoop(AgentLoopBase):
                     (
                         [agent_data.step_answerability_v0]
                         if agent_data.step_answerability_v0 is not None
+                        or agent_data.step_answerability_step_scores
                         else []
                     )
                     + agent_data.step_answerability_step_scores

@@ -86,6 +86,7 @@ class JudgeMember:
     enabled: bool = True
     request_body: dict[str, Any] | None = None
     concurrency_group: str = ""
+    score_group: str = ""
     max_concurrency: int = 0
 
     @classmethod
@@ -107,6 +108,7 @@ class JudgeMember:
             enabled=as_bool(item.get("enabled", True), True),
             request_body=dict(request_body or {}),
             concurrency_group=str(item.get("concurrency_group") or "").strip(),
+            score_group=str(item.get("score_group") or item.get("concurrency_group") or "").strip(),
             max_concurrency=max(0, as_int(item.get("max_concurrency"), 0)),
         )
 
@@ -130,6 +132,9 @@ class CommitteeGateway:
         self.max_workers = max(1, as_int(os.getenv("COMMITTEE_MAX_WORKERS"), max(1, len(self.members))))
         self.min_successes = max(1, as_int(os.getenv("COMMITTEE_MIN_SUCCESSES"), 1))
         self.require_all = as_bool(os.getenv("COMMITTEE_REQUIRE_ALL"), False)
+        self.min_success_groups = max(0, as_int(os.getenv("COMMITTEE_MIN_SUCCESS_GROUPS"), 0))
+        self.required_groups = self._parse_csv_env("COMMITTEE_REQUIRED_GROUPS")
+        self.required_any_groups = self._parse_csv_env("COMMITTEE_REQUIRED_ANY_GROUPS")
         self.default_temperature = as_float(os.getenv("COMMITTEE_DEFAULT_TEMPERATURE"), 0.25)
         self.log_path = os.getenv("COMMITTEE_LOG_JSONL", "").strip()
         self.max_inflight_requests = max(0, as_int(os.getenv("COMMITTEE_MAX_INFLIGHT_REQUESTS"), 0))
@@ -155,6 +160,13 @@ class CommitteeGateway:
 
     def _member_group(self, member: JudgeMember) -> str:
         return member.concurrency_group or member.base_url.rstrip("/")
+
+    def _member_score_group(self, member: JudgeMember) -> str:
+        return member.score_group or self._member_group(member)
+
+    def _parse_csv_env(self, name: str) -> set[str]:
+        raw = os.getenv(name, "")
+        return {item.strip() for item in raw.split(",") if item.strip()}
 
     def check_auth(self, headers: Any) -> bool:
         if not self.api_key:
@@ -194,6 +206,8 @@ class CommitteeGateway:
                 return {
                     "name": member.name,
                     "model": member.model,
+                    "score_group": self._member_score_group(member),
+                    "concurrency_group": self._member_group(member),
                     "temperature": body.get("temperature"),
                     "success": True,
                     "raw_answer": content,
@@ -208,6 +222,8 @@ class CommitteeGateway:
         return {
             "name": member.name,
             "model": member.model,
+            "score_group": self._member_score_group(member),
+            "concurrency_group": self._member_group(member),
             "temperature": body.get("temperature"),
             "success": False,
             "raw_answer": "",
@@ -237,8 +253,21 @@ class CommitteeGateway:
             judgments = [future.result() for future in concurrent.futures.as_completed(futures)]
         judgments.sort(key=lambda item: item.get("name", ""))
         successes = [item for item in judgments if item.get("success") and str(item.get("content", "")).strip()]
+        success_groups = {
+            str(item.get("score_group") or item.get("concurrency_group") or item.get("name") or "")
+            for item in successes
+        }
+        missing_required_groups = sorted(group for group in self.required_groups if group not in success_groups)
+        required_any_satisfied = not self.required_any_groups or bool(success_groups & self.required_any_groups)
         required_successes = len(self.members) if self.require_all else self.min_successes
-        status = 200 if len(successes) >= required_successes else 502
+        enough_successes = len(successes) >= required_successes
+        enough_groups = not self.min_success_groups or len(success_groups) >= self.min_success_groups
+        status = 200 if (
+            enough_successes
+            and enough_groups
+            and not missing_required_groups
+            and required_any_satisfied
+        ) else 502
         content = str(successes[0].get("content", "")) if successes else ""
         usage = self._merge_usage([item.get("usage", {}) for item in successes])
 
@@ -259,10 +288,24 @@ class CommitteeGateway:
             "committee_success_count": len(successes),
             "committee_total_count": len(judgments),
             "committee_required_success_count": required_successes,
+            "committee_success_groups": sorted(success_groups),
+            "committee_success_group_count": len(success_groups),
+            "committee_min_success_group_count": self.min_success_groups,
+            "committee_required_groups": sorted(self.required_groups),
+            "committee_required_any_groups": sorted(self.required_any_groups),
             "committee_latency_s": round(time.perf_counter() - started, 3),
         }
         if status != 200:
-            response["error"] = {"message": "not enough successful committee judge responses"}
+            reasons = []
+            if not enough_successes:
+                reasons.append("not enough successful committee judge responses")
+            if not enough_groups:
+                reasons.append("not enough successful committee judge groups")
+            if missing_required_groups:
+                reasons.append(f"missing required groups: {','.join(missing_required_groups)}")
+            if not required_any_satisfied:
+                reasons.append("missing any required strong group")
+            response["error"] = {"message": "; ".join(reasons) or "committee quorum failed"}
         self._log_response(response)
         return status, response
 
@@ -271,6 +314,10 @@ class CommitteeGateway:
             "status": "ok",
             "model": self.model_name,
             "require_all": self.require_all,
+            "min_successes": self.min_successes,
+            "min_success_groups": self.min_success_groups,
+            "required_groups": sorted(self.required_groups),
+            "required_any_groups": sorted(self.required_any_groups),
             "max_workers": self.max_workers,
             "max_inflight_requests": self.max_inflight_requests,
             "bounded_groups": sorted(self.group_semaphores),
@@ -280,6 +327,7 @@ class CommitteeGateway:
                     "model": member.model,
                     "base_url": member.base_url,
                     "concurrency_group": self._member_group(member),
+                    "score_group": self._member_score_group(member),
                     "max_concurrency": member.max_concurrency,
                 }
                 for member in self.members
@@ -318,10 +366,13 @@ class CommitteeGateway:
                 "success_count": response.get("committee_success_count"),
                 "total_count": response.get("committee_total_count"),
                 "required_success_count": response.get("committee_required_success_count"),
+                "success_group_count": response.get("committee_success_group_count"),
+                "success_groups": response.get("committee_success_groups"),
                 "latency_s": response.get("committee_latency_s"),
                 "members": [
                     {
                         "name": item.get("name"),
+                        "score_group": item.get("score_group"),
                         "success": item.get("success"),
                         "latency_s": item.get("latency_s"),
                         "error": item.get("error"),
