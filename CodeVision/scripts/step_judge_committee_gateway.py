@@ -389,6 +389,11 @@ class CommitteeGateway:
 GATEWAY = CommitteeGateway()
 
 
+class QueuedThreadingHTTPServer(ThreadingHTTPServer):
+    daemon_threads = True
+    request_queue_size = max(128, as_int(os.getenv("COMMITTEE_REQUEST_QUEUE_SIZE"), 256))
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "StepJudgeCommitteeGateway/1.0"
 
@@ -434,7 +439,7 @@ def main() -> None:
     port = as_int(os.getenv("COMMITTEE_PORT"), 19200)
     print(f"Starting step judge committee gateway on {host}:{port}", flush=True)
     print(f"Committee members: {[member.name for member in GATEWAY.members]}", flush=True)
-    server = ThreadingHTTPServer((host, port), Handler)
+    server = QueuedThreadingHTTPServer((host, port), Handler)
     server.serve_forever()
 
 

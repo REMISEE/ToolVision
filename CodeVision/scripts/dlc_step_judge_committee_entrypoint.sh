@@ -60,18 +60,21 @@ COMMITTEE_MIN_SUCCESS_GROUPS="${COMMITTEE_MIN_SUCCESS_GROUPS:-0}"
 COMMITTEE_REQUIRED_GROUPS="${COMMITTEE_REQUIRED_GROUPS:-}"
 COMMITTEE_REQUIRED_ANY_GROUPS="${COMMITTEE_REQUIRED_ANY_GROUPS:-}"
 COMMITTEE_MAX_INFLIGHT_REQUESTS="${COMMITTEE_MAX_INFLIGHT_REQUESTS:-0}"
+COMMITTEE_REQUEST_QUEUE_SIZE="${COMMITTEE_REQUEST_QUEUE_SIZE:-256}"
 COMMITTEE_LOCAL_MAX_CONCURRENCY="${COMMITTEE_LOCAL_MAX_CONCURRENCY:-0}"
 COMMITTEE_32B_MAX_CONCURRENCY="${COMMITTEE_32B_MAX_CONCURRENCY:-${COMMITTEE_LOCAL_MAX_CONCURRENCY}}"
 COMMITTEE_API_MAX_CONCURRENCY="${COMMITTEE_API_MAX_CONCURRENCY:-0}"
 COMMITTEE_INCLUDE_8B_TEST="${COMMITTEE_INCLUDE_8B_TEST:-0}"
 
 COMMITTEE_API1_NAME="${COMMITTEE_API1_NAME:-qwen36plus_api}"
+COMMITTEE_API1_ENABLED="${COMMITTEE_API1_ENABLED:-1}"
 COMMITTEE_API1_BASE_URL="${COMMITTEE_API1_BASE_URL:-${OFFLINE_SFT_QWEN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}}"
 COMMITTEE_API1_MODEL="${COMMITTEE_API1_MODEL:-qwen3.6-plus}"
 COMMITTEE_API1_API_KEY="${COMMITTEE_API1_API_KEY:-${OFFLINE_SFT_QWEN_API_KEY:-${DASHSCOPE_API_KEY:-}}}"
 COMMITTEE_API1_REQUEST_BODY="${COMMITTEE_API1_REQUEST_BODY:-{\"enable_thinking\":false}}"
 
 COMMITTEE_API2_NAME="${COMMITTEE_API2_NAME:-qwen35_397b_a17b_api}"
+COMMITTEE_API2_ENABLED="${COMMITTEE_API2_ENABLED:-0}"
 COMMITTEE_API2_BASE_URL="${COMMITTEE_API2_BASE_URL:-${OFFLINE_SFT_QWEN_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}}"
 COMMITTEE_API2_MODEL="${COMMITTEE_API2_MODEL:-qwen3.5-397b-a17b}"
 COMMITTEE_API2_API_KEY="${COMMITTEE_API2_API_KEY:-${OFFLINE_SFT_QWEN_API_KEY:-${DASHSCOPE_API_KEY:-}}}"
@@ -80,6 +83,7 @@ COMMITTEE_API2_REQUEST_BODY="${COMMITTEE_API2_REQUEST_BODY:-{\"enable_thinking\"
 JUDGE_WARMUP_TIMEOUT_S="${JUDGE_WARMUP_TIMEOUT_S:-1800}"
 JUDGE_KEEPALIVE_SECONDS="${JUDGE_KEEPALIVE_SECONDS:-300}"
 SKIP_JUDGE_WARMUP="${SKIP_JUDGE_WARMUP:-0}"
+JUDGE_PARALLEL_START="${JUDGE_PARALLEL_START:-1}"
 JUDGE_VLLM_EXTRA_ARGS_COMMON="${JUDGE_VLLM_EXTRA_ARGS_COMMON:-}"
 JUDGE_VLLM_EXTRA_ARGS_SMALL="${JUDGE_VLLM_EXTRA_ARGS_SMALL:-}"
 JUDGE_VLLM_EXTRA_ARGS_32B="${JUDGE_VLLM_EXTRA_ARGS_32B:-}"
@@ -96,15 +100,19 @@ export COMMITTEE_TEMPERATURE_A COMMITTEE_TEMPERATURE_B
 export COMMITTEE_TIMEOUT_S COMMITTEE_MAX_RETRIES
 export COMMITTEE_REQUIRE_ALL COMMITTEE_MIN_SUCCESSES COMMITTEE_MIN_SUCCESS_GROUPS
 export COMMITTEE_REQUIRED_GROUPS COMMITTEE_REQUIRED_ANY_GROUPS COMMITTEE_MAX_INFLIGHT_REQUESTS
+export COMMITTEE_REQUEST_QUEUE_SIZE
 export COMMITTEE_LOCAL_MAX_CONCURRENCY COMMITTEE_32B_MAX_CONCURRENCY COMMITTEE_API_MAX_CONCURRENCY
 export COMMITTEE_INCLUDE_8B_TEST
-export COMMITTEE_API1_NAME COMMITTEE_API1_BASE_URL COMMITTEE_API1_MODEL COMMITTEE_API1_API_KEY COMMITTEE_API1_REQUEST_BODY
-export COMMITTEE_API2_NAME COMMITTEE_API2_BASE_URL COMMITTEE_API2_MODEL COMMITTEE_API2_API_KEY COMMITTEE_API2_REQUEST_BODY
+export COMMITTEE_API1_NAME COMMITTEE_API1_ENABLED COMMITTEE_API1_BASE_URL COMMITTEE_API1_MODEL COMMITTEE_API1_API_KEY COMMITTEE_API1_REQUEST_BODY
+export COMMITTEE_API2_NAME COMMITTEE_API2_ENABLED COMMITTEE_API2_BASE_URL COMMITTEE_API2_MODEL COMMITTEE_API2_API_KEY COMMITTEE_API2_REQUEST_BODY
 
 cd "${ROOT_DIR}"
 mkdir -p "${JUDGE_OUTPUT_ROOT}/logs" "${JUDGE_OUTPUT_ROOT}/pids"
 
 SERVICE_PIDS=()
+HEALTH_LABELS=()
+HEALTH_PORTS=()
+HEALTH_LOGS=()
 
 wait_for_http() {
   local url="$1"
@@ -184,14 +192,35 @@ start_vllm() {
   local pid="$!"
   echo "${pid}" >"${pid_file}"
   SERVICE_PIDS+=("${pid}")
+  HEALTH_LABELS+=("${label}")
+  HEALTH_PORTS+=("${port}")
+  HEALTH_LOGS+=("${log_file}")
 
-  if [[ "${SKIP_JUDGE_WARMUP}" != "1" && "${SKIP_JUDGE_WARMUP,,}" != "true" ]]; then
+  if [[ "${JUDGE_PARALLEL_START}" != "1" && "${JUDGE_PARALLEL_START,,}" != "true" && "${SKIP_JUDGE_WARMUP}" != "1" && "${SKIP_JUDGE_WARMUP,,}" != "true" ]]; then
     if ! wait_for_http "http://127.0.0.1:${port}/health" "${JUDGE_WARMUP_TIMEOUT_S}"; then
       echo "${label} did not become healthy. Last log lines:" >&2
       tail -n 80 "${log_file}" >&2 || true
       exit 1
     fi
   fi
+}
+
+wait_for_vllm_healths() {
+  if [[ "${SKIP_JUDGE_WARMUP}" == "1" || "${SKIP_JUDGE_WARMUP,,}" == "true" ]]; then
+    return 0
+  fi
+  local idx
+  for idx in "${!HEALTH_PORTS[@]}"; do
+    local label="${HEALTH_LABELS[$idx]}"
+    local port="${HEALTH_PORTS[$idx]}"
+    local log_file="${HEALTH_LOGS[$idx]}"
+    echo "Waiting for ${label} health on port ${port}"
+    if ! wait_for_http "http://127.0.0.1:${port}/health" "${JUDGE_WARMUP_TIMEOUT_S}"; then
+      echo "${label} did not become healthy. Last log lines:" >&2
+      tail -n 80 "${log_file}" >&2 || true
+      exit 1
+    fi
+  done
 }
 
 build_committee_json() {
@@ -259,8 +288,15 @@ add_pair("qwen3_vl_32b", f"http://127.0.0.1:{os.environ['JUDGE_PORT_32B']}/v1", 
 if os.environ.get("COMMITTEE_INCLUDE_8B_TEST", "0").lower() in {"1", "true", "yes", "on"}:
     add_pair("qwen3_vl_8b_test", f"http://127.0.0.1:{os.environ['JUDGE_PORT_8B_TEST']}/v1", os.environ["JUDGE_MODEL_8B_TEST_NAME"], "JUDGE_LOCAL_API_KEY", max_concurrency=local_max_concurrency)
 
+def as_bool_env(name, default=True):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 api1_key = os.environ.get("COMMITTEE_API1_API_KEY", "")
-if api1_key and os.environ.get("COMMITTEE_API1_BASE_URL") and os.environ.get("COMMITTEE_API1_MODEL"):
+if as_bool_env("COMMITTEE_API1_ENABLED", True) and api1_key and os.environ.get("COMMITTEE_API1_BASE_URL") and os.environ.get("COMMITTEE_API1_MODEL"):
     os.environ["COMMITTEE_API1_API_KEY_RUNTIME"] = api1_key
     add_pair(
         os.environ.get("COMMITTEE_API1_NAME", "api1"),
@@ -272,7 +308,7 @@ if api1_key and os.environ.get("COMMITTEE_API1_BASE_URL") and os.environ.get("CO
     )
 
 api2_key = os.environ.get("COMMITTEE_API2_API_KEY", "")
-if api2_key and os.environ.get("COMMITTEE_API2_BASE_URL") and os.environ.get("COMMITTEE_API2_MODEL"):
+if as_bool_env("COMMITTEE_API2_ENABLED", False) and api2_key and os.environ.get("COMMITTEE_API2_BASE_URL") and os.environ.get("COMMITTEE_API2_MODEL"):
     os.environ["COMMITTEE_API2_API_KEY_RUNTIME"] = api2_key
     add_pair(
         os.environ.get("COMMITTEE_API2_NAME", "api2"),
@@ -301,6 +337,7 @@ start_gateway() {
   export COMMITTEE_REQUIRED_GROUPS
   export COMMITTEE_REQUIRED_ANY_GROUPS
   export COMMITTEE_MAX_INFLIGHT_REQUESTS
+  export COMMITTEE_REQUEST_QUEUE_SIZE
   export COMMITTEE_TIMEOUT_S
   export COMMITTEE_MAX_RETRIES
   export COMMITTEE_LOG_JSONL="${COMMITTEE_LOG_JSONL:-${JUDGE_OUTPUT_ROOT}/logs/committee_requests.jsonl}"
@@ -334,13 +371,14 @@ echo "JUDGE_OUTPUT_ROOT=${JUDGE_OUTPUT_ROOT}"
 echo "JUDGE_VLLM_ENV=${JUDGE_VLLM_ENV}"
 echo "GPU layout: 2B=${JUDGE_GPU_2B}, 4B=${JUDGE_GPU_4B}, 8B=${JUDGE_GPU_8B}, 32B=${JUDGE_GPU_32B}, 8B-test=${JUDGE_GPU_8B_TEST}"
 echo "Ports: 2B=${JUDGE_PORT_2B}, 4B=${JUDGE_PORT_4B}, 8B=${JUDGE_PORT_8B}, 32B=${JUDGE_PORT_32B}, 8B-test=${JUDGE_PORT_8B_TEST}, gateway=${COMMITTEE_PORT}"
-echo "API members: api1=$([[ -n "${COMMITTEE_API1_API_KEY}" ]] && echo enabled || echo disabled), api2=$([[ -n "${COMMITTEE_API2_API_KEY}" ]] && echo enabled || echo disabled)"
+echo "API members: api1=$([[ -n "${COMMITTEE_API1_API_KEY}" && "${COMMITTEE_API1_ENABLED,,}" != "0" && "${COMMITTEE_API1_ENABLED,,}" != "false" ]] && echo enabled || echo disabled), api2=$([[ -n "${COMMITTEE_API2_API_KEY}" && "${COMMITTEE_API2_ENABLED,,}" != "0" && "${COMMITTEE_API2_ENABLED,,}" != "false" ]] && echo enabled || echo disabled)"
 
 start_vllm "qwen3_vl_2b" "${JUDGE_MODEL_2B_PATH}" "${JUDGE_MODEL_2B_NAME}" "${JUDGE_PORT_2B}" "${JUDGE_GPU_2B}" 1 "${JUDGE_MAX_MODEL_LEN_SMALL}" "${JUDGE_GPU_MEMORY_UTILIZATION_SMALL}" "${JUDGE_VLLM_EXTRA_ARGS_SMALL}"
 start_vllm "qwen3_vl_4b" "${JUDGE_MODEL_4B_PATH}" "${JUDGE_MODEL_4B_NAME}" "${JUDGE_PORT_4B}" "${JUDGE_GPU_4B}" 1 "${JUDGE_MAX_MODEL_LEN_SMALL}" "${JUDGE_GPU_MEMORY_UTILIZATION_SMALL}" "${JUDGE_VLLM_EXTRA_ARGS_SMALL}"
 start_vllm "qwen3_vl_8b" "${JUDGE_MODEL_8B_PATH}" "${JUDGE_MODEL_8B_NAME}" "${JUDGE_PORT_8B}" "${JUDGE_GPU_8B}" 1 "${JUDGE_MAX_MODEL_LEN_SMALL}" "${JUDGE_GPU_MEMORY_UTILIZATION_SMALL}" "${JUDGE_VLLM_EXTRA_ARGS_SMALL}"
 start_vllm "qwen3_vl_32b" "${JUDGE_MODEL_32B_PATH}" "${JUDGE_MODEL_32B_NAME}" "${JUDGE_PORT_32B}" "${JUDGE_GPU_32B}" "${JUDGE_TP_32B}" "${JUDGE_MAX_MODEL_LEN_32B}" "${JUDGE_GPU_MEMORY_UTILIZATION_32B}" "${JUDGE_VLLM_EXTRA_ARGS_32B}"
 start_vllm "qwen3_vl_8b_test" "${JUDGE_MODEL_8B_PATH}" "${JUDGE_MODEL_8B_TEST_NAME}" "${JUDGE_PORT_8B_TEST}" "${JUDGE_GPU_8B_TEST}" 1 "${JUDGE_MAX_MODEL_LEN_SMALL}" "${JUDGE_GPU_MEMORY_UTILIZATION_SMALL}" "${JUDGE_VLLM_EXTRA_ARGS_SMALL}"
+wait_for_vllm_healths
 
 export COMMITTEE_API1_API_KEY_RUNTIME="${COMMITTEE_API1_API_KEY}"
 export COMMITTEE_API2_API_KEY_RUNTIME="${COMMITTEE_API2_API_KEY}"
