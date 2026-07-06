@@ -77,7 +77,7 @@ def get_job(job_id: str) -> dict[str, Any]:
 
 def pod_ip(job: dict[str, Any]) -> str:
     for pod in job.get("Pods") or []:
-        ip = pod.get("PodIp") or pod.get("PodIP")
+        ip = pod.get("PodIp") or pod.get("PodIP") or pod.get("Ip") or pod.get("IP")
         if ip:
             return str(ip)
     return ""
