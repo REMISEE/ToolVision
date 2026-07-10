@@ -160,6 +160,33 @@ def compute_step_answerability_delta(
     }
 
 
+def step_answerability_infra_failed(scores: Any, records: Any = None, *, used_tool: bool = False) -> bool:
+    """Return True when judge infra failed for a rollout that attempted tools.
+
+    No-tool rollouts legitimately have no step-answerability scores. Tool
+    rollouts need a valid baseline score; otherwise a missing judge result would
+    unfairly suppress only that rollout inside a GSPO response group.
+    """
+
+    if not used_tool:
+        return False
+
+    numeric_scores = coerce_json_list(scores)
+    if not numeric_scores:
+        return True
+    try:
+        float(numeric_scores[0])
+    except Exception:
+        return True
+
+    for item in coerce_json_list(records):
+        if not isinstance(item, dict):
+            continue
+        if item.get("error"):
+            return True
+    return False
+
+
 @dataclass(slots=True)
 class StepAnswerabilityConfig:
     enable: bool = False
@@ -849,4 +876,5 @@ __all__ = [
     "StepAnswerabilityJudgeClient",
     "compute_step_answerability_delta",
     "coerce_json_list",
+    "step_answerability_infra_failed",
 ]

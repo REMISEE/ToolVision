@@ -9,15 +9,22 @@ and delta aggregation paths used by RL rollout.
 from __future__ import annotations
 
 import json
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 from PIL import Image
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from recipe.codevision.rewards.step_answerability import (
     StepAnswerabilityJudgeClient,
     compute_step_answerability_delta,
+    step_answerability_infra_failed,
 )
 
 
@@ -210,6 +217,27 @@ def test_judge_failure_is_recorded_not_raised() -> None:
             raise AssertionError("failure should record error")
 
 
+def test_step_infra_failure_requires_tool_attempt() -> None:
+    if step_answerability_infra_failed([], [], used_tool=False):
+        raise AssertionError("no-tool rollout without step scores should not be an infra failure")
+    if not step_answerability_infra_failed([], [], used_tool=True):
+        raise AssertionError("tool rollout without baseline should be an infra failure")
+    if not step_answerability_infra_failed([None, 1.0], [], used_tool=True):
+        raise AssertionError("tool rollout with missing baseline should be an infra failure")
+    if not step_answerability_infra_failed(
+        [0.0, None],
+        [{"state_label": "baseline_before_tools", "score": 0.0}, {"state_label": "after_tool_step_1", "error": "timeout"}],
+        used_tool=True,
+    ):
+        raise AssertionError("judge record error should be an infra failure")
+    if step_answerability_infra_failed(
+        [0.0, 1.0],
+        [{"state_label": "baseline_before_tools", "score": 0.0}, {"state_label": "after_tool_step_1", "score": 1.0}],
+        used_tool=True,
+    ):
+        raise AssertionError("valid tool rollout should not be an infra failure")
+
+
 def test_repeated_judgments_mean_and_reward_scale() -> None:
     with MockServer({"baseline_before_tools": ["dog", "dog"], "after_tool_step_1": ["cat", "dog"]}) as server:
         client = make_client(server.url, num_judgments=2, aggregation="mean")
@@ -329,6 +357,7 @@ def main() -> int:
         test_missing_baseline_gets_no_positive_gain,
         test_multistep_repeats_do_not_farm_reward,
         test_judge_failure_is_recorded_not_raised,
+        test_step_infra_failure_requires_tool_attempt,
         test_repeated_judgments_mean_and_reward_scale,
         test_committee_payload_averages_successes_only,
         test_committee_group_mean_weights_model_groups_once,

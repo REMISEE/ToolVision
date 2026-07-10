@@ -120,6 +120,7 @@ class AgentData:
         self.tool_exec_error_count: int = 0
         self.tool_exec_success_count: int = 0
         # Optional answerability scores: baseline V0 plus one score per tool step.
+        self.step_answerability_baseline_attempted: bool = False
         self.step_answerability_v0: float | None = None
         self.step_answerability_step_scores: list[float | None] = []
         self.step_answerability_valid: list[bool] = []
@@ -619,7 +620,8 @@ class ToolAgentLoop(AgentLoopBase):
         question = self._step_answerability_question(agent_data, extra_info)
         answer_instruction = self._step_answerability_answer_instruction(extra_info)
 
-        if agent_data.step_answerability_v0 is None:
+        if not agent_data.step_answerability_baseline_attempted:
+            agent_data.step_answerability_baseline_attempted = True
             baseline_record = await self.loop.run_in_executor(
                 None,
                 lambda: client.score_state(
@@ -641,6 +643,9 @@ class ToolAgentLoop(AgentLoopBase):
                     agent_data.step_answerability_v0 = float(baseline_record["score"])
                 except Exception:
                     agent_data.step_answerability_v0 = None
+
+        if agent_data.step_answerability_v0 is None:
+            return
 
         step_record = await self.loop.run_in_executor(
             None,

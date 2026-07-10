@@ -48,6 +48,7 @@ try:
         STEP_REWARD_VERSION,
         compute_step_answerability_delta,
         coerce_json_list,
+        step_answerability_infra_failed,
     )
 except Exception:  # pragma: no cover - optional outside CodeVision recipe
     STEP_REWARD_VERSION = "step_answerability_delta_v1"
@@ -79,6 +80,9 @@ except Exception:  # pragma: no cover - optional outside CodeVision recipe
             "valid_count": 0,
             "version": STEP_REWARD_VERSION,
         }
+
+    def step_answerability_infra_failed(scores, records=None, *, used_tool=False):
+        return False
 
 logger = logging.getLogger(__file__)
 logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
@@ -1864,6 +1868,36 @@ class AgentLoopManager:
         is_correct_list: list[bool],
     ) -> None:
         """MUT clean reward plus a small answerability-delta shaping term."""
+        group_to_indices = self._group_indices_by_uid(meta["uid_list"])
+        step_delta_list: list[dict[str, Any]] = []
+        step_infra_failure_list: list[float] = [0.0] * base["bsz"]
+        step_group_mask_list: list[float] = [1.0] * base["bsz"]
+        step_group_mask_reason_list: list[str] = ["ok"] * base["bsz"]
+
+        for i in range(base["bsz"]):
+            step_delta = compute_step_answerability_delta(
+                meta["step_answerability_scores_list"][i],
+                meta["step_answerability_valid_list"][i],
+                tau=params["step_tau"],
+                cap=params["step_cap"],
+            )
+            step_delta_list.append(step_delta)
+            used_tool_for_step_judge = bool(meta["used_any_tool_list"][i] or meta["code_count_list"][i] > 0)
+            if step_answerability_infra_failed(
+                meta["step_answerability_scores_list"][i],
+                meta["step_answerability_records_list"][i],
+                used_tool=used_tool_for_step_judge,
+            ):
+                step_infra_failure_list[i] = 1.0
+
+        for _, idx_list in group_to_indices.items():
+            failed_indices = [idx for idx in idx_list if step_infra_failure_list[idx] > 0.5]
+            if not failed_indices:
+                continue
+            for idx in idx_list:
+                step_group_mask_list[idx] = 0.0
+                step_group_mask_reason_list[idx] = f"judge_infra_failure_in_group:{failed_indices}"
+
         new_scores = base["base_scores"].clone()
         r_acc_list: list[float] = [0.0] * base["bsz"]
         fmt_reward_list: list[float] = [0.0] * base["bsz"]
@@ -1873,9 +1907,11 @@ class AgentLoopManager:
         turn_overuse_penalty_list: list[float] = [0.0] * base["bsz"]
         regular_tool_penalty_list: list[float] = [0.0] * base["bsz"]
         r_base_total_list: list[float] = [0.0] * base["bsz"]
+        r_step_raw_unmasked_list: list[float] = [0.0] * base["bsz"]
         r_step_raw_list: list[float] = [0.0] * base["bsz"]
         step_gate_list: list[float] = [0.0] * base["bsz"]
         r_step_list: list[float] = [0.0] * base["bsz"]
+        step0_score_list: list[float] = [0.0] * base["bsz"]
         step_scored_count_list: list[int] = [0] * base["bsz"]
         step_valid_count_list: list[int] = [0] * base["bsz"]
         step_best_score_list: list[float] = [0.0] * base["bsz"]
@@ -1891,16 +1927,13 @@ class AgentLoopManager:
                 is_correct=is_correct_list[i],
                 format_reward=self._format_reward_value(output, i),
             )
-            step_delta = compute_step_answerability_delta(
-                meta["step_answerability_scores_list"][i],
-                meta["step_answerability_valid_list"][i],
-                tau=params["step_tau"],
-                cap=params["step_cap"],
-            )
-            r_step_raw = float(step_delta["capped_delta"])
+            step_delta = step_delta_list[i]
+            r_step_raw_unmasked = float(step_delta["capped_delta"])
+            r_step_raw = r_step_raw_unmasked * float(step_group_mask_list[i])
             step_gate = base_components["mut_weight"] if params["step_use_mut_weight"] else 1.0
             r_step = params["step_weight"] * step_gate * r_step_raw
             r_total = base_components["r_total"] + r_step
+            step0_score = step_delta.get("v0")
 
             new_scores[i] = torch.tensor(r_total, dtype=base["base_scores"].dtype, device=base["base_scores"].device)
             r_acc_list[i] = base_components["r_acc"]
@@ -1911,9 +1944,11 @@ class AgentLoopManager:
             turn_overuse_penalty_list[i] = base_components["turn_overuse_penalty"]
             regular_tool_penalty_list[i] = base_components["regular_tool_penalty"]
             r_base_total_list[i] = base_components["r_total"]
+            r_step_raw_unmasked_list[i] = r_step_raw_unmasked
             r_step_raw_list[i] = r_step_raw
             step_gate_list[i] = float(step_gate)
             r_step_list[i] = r_step
+            step0_score_list[i] = float(step0_score) if step0_score is not None else 0.0
             step_scored_count_list[i] = int(step_delta["scored_count"])
             step_valid_count_list[i] = int(step_delta["valid_count"])
             step_best = step_delta.get("best_score")
@@ -1925,7 +1960,12 @@ class AgentLoopManager:
                 f"StepScores: {meta['step_answerability_scores_list'][i]}, "
                 f"StepValid: {meta['step_answerability_valid_list'][i]}, "
                 f"StepGains: {step_delta['step_gains']}, "
-                f"R_base_total: {base_components['r_total']}, R_step_raw: {r_step_raw}, "
+                f"Step0Score: {step0_score}, "
+                f"StepJudgeInfraFailure: {step_infra_failure_list[i]}, "
+                f"StepGroupMask: {step_group_mask_list[i]}, "
+                f"StepGroupMaskReason: {step_group_mask_reason_list[i]}, "
+                f"R_base_total: {base_components['r_total']}, "
+                f"R_step_raw_unmasked: {r_step_raw_unmasked}, R_step_raw: {r_step_raw}, "
                 f"StepGate: {step_gate}, R_step: {r_step}, R_total: {r_total}."
             )
             print(details[i])
@@ -1944,9 +1984,13 @@ class AgentLoopManager:
                 "P_turn_overuse": turn_overuse_penalty_list,
                 "P_regular_tool": regular_tool_penalty_list,
                 "R_base_total": r_base_total_list,
+                "R_step_raw_unmasked": r_step_raw_unmasked_list,
                 "R_step_raw": r_step_raw_list,
                 "StepGate": step_gate_list,
                 "R_step": r_step_list,
+                "StepJudgeInfraFailure": step_infra_failure_list,
+                "StepGroupMask": step_group_mask_list,
+                "Step0Score": step0_score_list,
                 "StepScoredCount": step_scored_count_list,
                 "StepValidCount": step_valid_count_list,
                 "StepBestScore": step_best_score_list,
